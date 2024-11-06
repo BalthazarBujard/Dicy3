@@ -42,10 +42,10 @@ def fade_inout(size,fade_t=0.005,sampling_rate=16000):
     return fade_inout
 
 def cross_fade_windows(fade_time,sampling_rate):
-    f=1/(4*fade_time)
-    l=np.linspace(0,fade_time,int(fade_time*sampling_rate))
-    fade_in = np.sin(2*np.pi*f*l)
-    fade_out = np.cos(2*np.pi*f*l)
+    f=1/(4*fade_time) #frequency of cos and sine windows (sin=1 and cos=0 at tmax=fade_time)
+    t=np.linspace(0,fade_time,int(fade_time*sampling_rate))
+    fade_in = np.sin(2*np.pi*f*t)
+    fade_out = np.cos(2*np.pi*f*t)
     
     return fade_in,fade_out
 
@@ -89,13 +89,16 @@ def crossfade(memory_chunks,response,continous,fade_in_idx,fade_out_idx,fade_in,
     
     return response
 
-def crossfadev2(memory,response,continous,fade_in_t,fade_out_t,fade_in,fade_out,r,x):
+def crossfadev2(memory,response,continous,fade_in_t,fade_out_t,fade_in,fade_out,r,x_l,x_r):
+    #compute fade_in, fade_out, r here from fade_time
+    # fade_in,fade_out = cross_fade_windows(fade_t,sampling_rate)
+    # r = int((fade_t/2)*sampling_rate) #crossing point = half fade time
     
     #get delta/2 in front of response (last continous chunk) and delta/2 before continous (new bloc to fade in)
     #not first iteration -> response not empty
     if fade_out_t!=None and fade_in_t!=None:
         prev = memory[fade_in_t-r:fade_in_t] if fade_in_t>r else [] #s0-1
-        nextt = memory[fade_out_t:fade_out_t+r-x] if fade_out_t+r<len(memory) else [] #prev s1, shift by x to sync with new segment
+        nextt = memory[fade_out_t:fade_out_t+r-x_l] if fade_out_t+r<len(memory) else [] #prev s1, shift by x to sync with new segment
         
         r1=len(fade_out)-len(nextt)
         r2=len(fade_in)-len(prev)
@@ -127,7 +130,7 @@ def crossfadev2(memory,response,continous,fade_in_t,fade_out_t,fade_in,fade_out,
         continous = continous[r2+1:] #verifier si ±1
     
     elif fade_out_t != None : #if new segment is silence just fade out prev segemnt 
-        nextt = memory[fade_out_t:fade_out_t+r-x] if fade_out_t+r<len(memory) else []
+        nextt = memory[fade_out_t:fade_out_t+r-x_l] if fade_out_t+r<len(memory) else []
         r1=len(fade_out)-len(nextt)
         to_fade_out = np.concatenate([response[-r1:],nextt])
         cf = to_fade_out*fade_out
@@ -199,11 +202,11 @@ def cleanv2(memory,t0,t1,sampling_rate,onsets,backtrack,max_backtrack):
     t0 = t0/sampling_rate
     t1 = t1/sampling_rate
     
-    pad=0
+    pad=0 #for sync issues, we need to have the same continous len before and after cleaning
     
-    duration = t1-t0
+    #duration = t1-t0
     #close to end of continous chunk
-    lower = t1 - min(0.25,0.1*duration) #for onset close to end no sync problem
+    lower = t1 - max_backtrack #min(0.25,0.1*duration) #for onset close to end no sync problem
     onsets_ = find_elems_in_range(onsets,lower,t1)
     if len(onsets_)>0:
         onset = onsets_[0] #first onset above thresh
@@ -220,17 +223,28 @@ def cleanv2(memory,t0,t1,sampling_rate,onsets,backtrack,max_backtrack):
         onset = onsets_[0] #first onset above thresh
         back = backtrack[onsets<=onset][-1] #get matching backtrack to onset as new end
         if abs(back-t0)<max_backtrack: #dont go too far away
+            pad += back-t0 #take account shift at beginning 
             t0 = back
+            
             
     #to samples
     t0 = int(t0*sampling_rate)
     t1 = int(t1*sampling_rate)
     pad = int(pad*sampling_rate)
     
-    continous = memory[t0:t1]
-    continous = np.concatenate([continous,np.zeros(pad)]) #pad with zeros for sync issues
+    # continous = memory[t0:t1]
+    # if pad>0:
+    #     fill = np.full(pad,fill_value=continous[-1])
+    #     w=cross_fade_windows(pad*sampling_rate,sampling_rate)[1] #get cos window
+    #     fill *= w #fade from last value to zero
+    #     #peut etre il faut concatenate continous[:-1], fill pck sinon on repete valeure de fin
+    #     continous = np.concatenate([continous,fill]) #pad with last value and fade out
+        
+    # if pad<0 : #happens if no backtrack at end and backtrack < t0 at beginning --> we should crop the end of the continous to maintain synchroinicity
+    #     continous = continous[:pad]
     
-    return continous,t0,t1
+    # return continous,t0,t1
+    return t0,t1
 
 def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoupling, chunk_segmentation : str):
     
@@ -355,14 +369,15 @@ def concatenate(memory : np.ndarray, memory_chunks : List[np.ndarray], queries :
     continious_lens=[]
     
     #memory = np.concatenate(memory_chunks)
-    onsets, backtrack = detect_onsets(memory.astype(np.float32),sampling_rate,True) #compute onsets and backtrack once
+    onsets, backtrack = detect_onsets(memory.astype(np.float32),sampling_rate,True) #compute onsets and backtrack once over whole memeory
     
+    #compute crossfade windows
     fade_in,fade_out = cross_fade_windows(fade_t,sampling_rate)
-    r = int((fade_t/2)*sampling_rate) #half fade time
+    r = int((fade_t/2)*sampling_rate) #crossing point = half fade time
     #fade_in_idx,fade_out_idx = None,None
-    fade_in_t,fade_out_t = None,None
+    fade_in_t,fade_out_t = None,None #fade in and out timestamps (in samples)
     
-    if max_backtrack==None : max_backtrack = fade_t/2 #si plus grand que fade_t/2 il faudrait recalculer la fenetre (pas le temps)
+    if max_backtrack==None : max_backtrack = fade_t/2 #si plus grand que fade_t/2 il faudrait recalculer la fenetre 
     
     memory_chunks.append(np.zeros_like(memory_chunks[0])) #comme ca le -1 prends du silence
     
@@ -375,6 +390,7 @@ def concatenate(memory : np.ndarray, memory_chunks : List[np.ndarray], queries :
         #fade_in_idx = s0 #save first index of continous chunk
         fade_in_t = sum([len(memory_chunks[i]) for i in range(0,s0)]) if s0>0 else 0 #start time of first chunk (in samples)
         
+        # -1 is silence
         if s0==-1 : 
             fade_in_t = None #no fade in for silence
             #find longest consecutive silences
@@ -384,7 +400,7 @@ def concatenate(memory : np.ndarray, memory_chunks : List[np.ndarray], queries :
                 stop+=1
                 if stop == len(queries):break #finished with consecutive silence
                 s1 = queries[stop]
-        
+        # non silent chunk
         else :    
             #find longest consecutive queries
             while s1 == s0+1 and s0!=-1:
@@ -404,13 +420,24 @@ def concatenate(memory : np.ndarray, memory_chunks : List[np.ndarray], queries :
        
         #check if there is an onset too soon or too late in the continous segment
         #r_in,r_out=0,0 # reste de crop par onset a utiliser pour modifier fade_in/out_t
-        x=0
+        x_l, x_r = 0,0 # crossing points shift after backtrack
         if remove and s0!=-1:
             #continous,r_in,r_out=clean(memory_chunks,continous,s0,sampling_rate)
             t0,t1 = fade_in_t,fade_in_t+len(continous)
-            continous,t0,t1=cleanv2(memory,t0,t1,sampling_rate,onsets,backtrack,
+            
+            # continous,t0,t1=cleanv2(memory,t0,t1,sampling_rate,onsets,backtrack,
+            #                         max_backtrack=max_backtrack)
+            
+            # detect onsets and move crossing points
+            t0,t1 = cleanv2(memory,t0,t1,sampling_rate,onsets,backtrack,
                                     max_backtrack=max_backtrack)
-            x = fade_in_t - t0 #decalage du point de montage >0 : decaler en arriere et <0 decaler en avant
+            
+            continous = memory[t0:t1]
+            
+            #decalage du point de montage ...
+            x_l = fade_in_t - t0 #du debut >0 : decaler en arriere et <0 decaler en avant
+            #x_r = fade_out_t - t1 doit etre calcule apres crossfade # de fin toujours >=0
+            
             fade_in_t=t0
                     
         #update fade_in/out_t
@@ -418,9 +445,10 @@ def concatenate(memory : np.ndarray, memory_chunks : List[np.ndarray], queries :
         #fade_out_t = fade_out_t-r_out if fade_out_t!=None else None
         
         #response = crossfade(memory_chunks,response,continous,fade_in_idx,fade_out_idx,fade_in,fade_out,r)
-        response = crossfadev2(memory,response,continous,fade_in_t,fade_out_t,fade_in,fade_out,r,x)
+        response = crossfadev2(memory,response,continous,fade_in_t,fade_out_t,fade_in,fade_out,r,x_l,x_r)
         
         #fade_out_idx = s1 #last continous index is the fade out index for the next iteration
+        x_r = fade_out_t - t1
         fade_out_t = fade_in_t+len(continous) if s0!=-1 else None
         #response.extend(continous)
         
@@ -551,7 +579,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     if chunk_segmentation=='onset':
         raise ValueError("Concatenation algorithm not compatible with 'onset' segmentation")
     
-    if device == None : device = lock_gpu()[0]
+    if device == None : device = lock_gpu()[0][0]
     
     prYellow("Creating data structure from src and memory paths...")
     #build data structure for model input
