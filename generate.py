@@ -10,7 +10,7 @@ import numpy as np
 import argparse
 from librosa import load
 
-#todo avec nvx modeles il y a pas beosin de donner chunk et track duration -> dans model params
+
 def generate_examples(model_ckp,with_coupling,remove,k,fade_time,num_examples,data,save_dir):
     model, params = load_model_checkpoint(model_ckp)
     #model.freeze()
@@ -136,7 +136,7 @@ if __name__=='__main__':
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
     parser.add_argument("--k",type=float,default=0.1)
-    parser.add_argument('--fade_time',type=float,default=0.1)
+    parser.add_argument('--fade_time',type=float,default=0.04)
     parser.add_argument("--num_examples",type=int)
     parser.add_argument("--data")
     parser.add_argument('--memory')

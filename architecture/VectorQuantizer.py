@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.cuda.amp import autocast
 import numpy as np
-from vector_quantize_pytorch import EuclideanCodebook, CosineSimCodebook, gumbel_sample, identity
+#from vector_quantize_pytorch import EuclideanCodebook, CosineSimCodebook, gumbel_sample, identity
 from torch import einsum
 from einops import rearrange
 
@@ -139,113 +139,113 @@ class KmeansQuantizer(nn.Module):
 #general vector quantizer from lucidrains repo with some modifications for our purposes
 
 #raises problems with whole model (CUDA kernel problem) -> directly kmodified ludicrains vectorquantize
-class VectorQuantizer(nn.Module):
-    def __init__(self,
-                dim,
-                codebook_size,
-                heads = 1,
-                separate_codebook_per_head = False,
-                kmeans_init = False,
-                kmeans_iters = 10,
-                sync_kmeans = True,
-                use_cosine_sim = False,
-                decay = 0.8,
-                eps = 1e-5,
-                threshold_ema_dead_code = 2,
-                commitment_weight=1.,
-                diversity_weight=0.1,
-                reset_cluster_size = None,
-                use_ddp = False,
-                learnable_codebook = False,
-                gumbel_sample = gumbel_sample,
-                sample_codebook_temp = 1.,
-                ema_update = True,
-                affine_param = False,
-                sync_affine_param = False,
-                affine_param_batch_decay = 0.99,
-                affine_param_codebook_decay = 0.9):
+# class VectorQuantizer(nn.Module):
+#     def __init__(self,
+#                 dim,
+#                 codebook_size,
+#                 heads = 1,
+#                 separate_codebook_per_head = False,
+#                 kmeans_init = False,
+#                 kmeans_iters = 10,
+#                 sync_kmeans = True,
+#                 use_cosine_sim = False,
+#                 decay = 0.8,
+#                 eps = 1e-5,
+#                 threshold_ema_dead_code = 2,
+#                 commitment_weight=1.,
+#                 diversity_weight=0.1,
+#                 reset_cluster_size = None,
+#                 use_ddp = False,
+#                 learnable_codebook = False,
+#                 gumbel_sample = gumbel_sample,
+#                 sample_codebook_temp = 1.,
+#                 ema_update = True,
+#                 affine_param = False,
+#                 sync_affine_param = False,
+#                 affine_param_batch_decay = 0.99,
+#                 affine_param_codebook_decay = 0.9):
         
-        super().__init__()
-        self.dim=dim
-        self.heads=heads
-        self.separate_codebook_per_head=separate_codebook_per_head
-        self.learnable_codebook = learnable_codebook
-        num_codebooks = heads if separate_codebook_per_head else 1
-        self.vocab_size = num_codebooks*codebook_size
-        self.commit_weight=commitment_weight
-        self.diversity_weight = diversity_weight
-        
-        
-        codebook_class = EuclideanCodebook if not use_cosine_sim else CosineSimCodebook
-        
-        codebook_kwargs = dict(
-            dim = dim,
-            num_codebooks = num_codebooks,
-            codebook_size = codebook_size,
-            kmeans_init = kmeans_init,
-            kmeans_iters = kmeans_iters,
-            sync_kmeans = sync_kmeans,
-            decay = decay,
-            eps = eps,
-            threshold_ema_dead_code = threshold_ema_dead_code,
-            learnable_codebook = learnable_codebook,
-            sample_codebook_temp = sample_codebook_temp,
-            gumbel_sample = gumbel_sample,
-            ema_update = ema_update
-        )
+#         super().__init__()
+#         self.dim=dim
+#         self.heads=heads
+#         self.separate_codebook_per_head=separate_codebook_per_head
+#         self.learnable_codebook = learnable_codebook
+#         num_codebooks = heads if separate_codebook_per_head else 1
+#         self.vocab_size = num_codebooks*codebook_size
+#         self.commit_weight=commitment_weight
+#         self.diversity_weight = diversity_weight
         
         
-        self._codebook = codebook_class(**codebook_kwargs)
+#         codebook_class = EuclideanCodebook if not use_cosine_sim else CosineSimCodebook
         
-    # TODO : HANDLE MULTI HEAD CASE 
-    @property
-    def codebook(self):
-        codebook = self._codebook.embed
-        return codebook
+#         codebook_kwargs = dict(
+#             dim = dim,
+#             num_codebooks = num_codebooks,
+#             codebook_size = codebook_size,
+#             kmeans_init = kmeans_init,
+#             kmeans_iters = kmeans_iters,
+#             sync_kmeans = sync_kmeans,
+#             decay = decay,
+#             eps = eps,
+#             threshold_ema_dead_code = threshold_ema_dead_code,
+#             learnable_codebook = learnable_codebook,
+#             sample_codebook_temp = sample_codebook_temp,
+#             gumbel_sample = gumbel_sample,
+#             ema_update = ema_update
+#         )
+        
+        
+#         self._codebook = codebook_class(**codebook_kwargs)
+        
+#     # TODO : HANDLE MULTI HEAD CASE 
+#     @property
+#     def codebook(self):
+#         codebook = self._codebook.embed
+#         return codebook
     
     
-    @autocast(enabled = False)
-    def forward(
-        self,
-        x,
-        sample_codebook_temp = None,
-        mask = None,
-        freeze_codebook = False
-    ):
+#     @autocast(enabled = False)
+#     def forward(
+#         self,
+#         x,
+#         sample_codebook_temp = None,
+#         mask = None,
+#         freeze_codebook = False
+#     ):
         
         
-        # l2norm for cosine sim, otherwise identity
-        x = self._codebook.transform_input(x)
+#         # l2norm for cosine sim, otherwise identity
+#         x = self._codebook.transform_input(x)
         
-        quantize, embed_ind, distances = self._codebook(x, sample_codebook_temp, mask, freeze_codebook)
+#         quantize, embed_ind, distances = self._codebook(x, sample_codebook_temp, mask, freeze_codebook)
         
-        if self.training:
-            # determine code to use for commitment loss
-            maybe_detach = torch.detach if not self.learnable_codebook or freeze_codebook else identity
+#         if self.training:
+#             # determine code to use for commitment loss
+#             maybe_detach = torch.detach if not self.learnable_codebook or freeze_codebook else identity
 
-            commit_quantize = maybe_detach(quantize)            
+#             commit_quantize = maybe_detach(quantize)            
 
-            # straight through
+#             # straight through
 
-            quantize = x + (quantize - x).detach()
+#             quantize = x + (quantize - x).detach()
             
-        loss = torch.tensor([0.], device = x.device, requires_grad = self.training)
+#         loss = torch.tensor([0.], device = x.device, requires_grad = self.training)
         
-        if self.training:
-            #compute commit loss
-            commit_loss = F.mse_loss(commit_quantize, x)
+#         if self.training:
+#             #compute commit loss
+#             commit_loss = F.mse_loss(commit_quantize, x)
             
-            #compute diversity loss
-            #B,L,D = x.size()
-            #soft_dist = torch.softmax(distances.view(B*L,self.codebook.num_codebooks,-1).float(), dim=-1)
-            #perplexity = self.compute_perplexity(soft_dist)
-            diversity_loss = torch.tensor([0.], device = x.device, requires_grad = self.training)#1 - perplexity/self.vocab_size
+#             #compute diversity loss
+#             #B,L,D = x.size()
+#             #soft_dist = torch.softmax(distances.view(B*L,self.codebook.num_codebooks,-1).float(), dim=-1)
+#             #perplexity = self.compute_perplexity(soft_dist)
+#             diversity_loss = torch.tensor([0.], device = x.device, requires_grad = self.training)#1 - perplexity/self.vocab_size
             
-            loss = self.commit_weight*commit_loss + self.diversity_weight*diversity_loss
+#             loss = self.commit_weight*commit_loss + self.diversity_weight*diversity_loss
         
-        # TODO : handle multi head case 
+#         # TODO : handle multi head case 
         
-        return quantize, embed_ind, loss
+#         return quantize, embed_ind, loss
 
 
 #from hugging face's w2v2 repo : https://github.com/huggingface/transformers/blob/v4.40.1/src/transformers/models/wav2vec2/modeling_wav2vec2.py#L941

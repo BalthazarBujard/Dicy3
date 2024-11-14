@@ -1,13 +1,21 @@
 from .Encoder import LocalEncoder,Backbone
 from .Decision import Decision
-from .VectorQuantizer import VectorQuantizer, GumbelVectorQuantizer, KmeansQuantizer
+from .VectorQuantizer import KmeansQuantizer # VectorQuantizer, GumbelVectorQuantizer, 
 from .Seq2Seq import Seq2SeqBase, Seq2SeqCoupling 
 import numpy as np
 from fairseq.checkpoint_utils import load_model_ensemble_and_task
-from vector_quantize_pytorch import VectorQuantize # TODO : ADD OTHER OPTIONS OF VQ
+#from vector_quantize_pytorch import VectorQuantize # TODO : ADD OTHER OPTIONS OF VQ
 import torch.nn as nn
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+#wrapper class to get eattributes without changing whole code
+class myDDP(DDP):
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)
 
 #script to build different models and load checkpopints
 
@@ -86,13 +94,7 @@ def build_decision(dim, layers, vocab_size , inner_dim=2048, heads=8, dropout=0.
     decisionModule = Decision(dim, layers, vocab_size, inner_dim, heads, dropout, decoder_only, norm_first)
     return decisionModule
     
-#wrapper class to get eattributes without changing whole code
-class myDDP(DDP):
-    def __getattr__(self, name):
-        try:
-            return super().__getattr__(name)
-        except AttributeError:
-            return getattr(self.module, name)
+
 
 def SimpleSeq2SeqModel(backbone_checkpoint,
                        backbone_type, 
