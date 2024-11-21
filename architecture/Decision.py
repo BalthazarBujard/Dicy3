@@ -27,6 +27,10 @@ class Decision(nn.Module):
         
         self.output_layer = nn.Linear(self.dim,vocab_size)
     
+    @property
+    def device(self):
+        return next(self.parameters()).device
+    
     def forward(self, src, tgt, src_mask=None, tgt_mask=None, src_pad_mask=None, tgt_pad_mask=None):
         
         if self.decoder_only:

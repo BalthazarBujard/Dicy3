@@ -3,7 +3,7 @@
 #%%
 from architecture.Model import build_backbone
 from utils.utils import lock_gpu,prYellow,prGreen
-from wav2vec2.wav2vec2_utils import DataCollatorForWav2Vec2
+from wav2vec2.wav2vec2_utils import DataCollatorForWav2Vec2 # type: ignore
 from MusicDataset.MusicDataset_v2 import MusicContainer,Fetcher
 from sklearn.cluster import MiniBatchKMeans
 #from torch_kmeans import KMeans

@@ -180,6 +180,26 @@ def compute_consecutive_lengths(idxs):
     
     return lengths
 
+def concatenate_response(memory:np.ndarray, memory_chunks:np.ndarray, queries:np.ndarray,
+                         max_chunk_duration:float, sampling_rate:int, concat_fade_time:float, 
+                         remove:bool, max_backtrack:float):
+    #create concatenate object
+    concatenate = Concatenator() 
+    
+    #append 2x chunk duration with zeros for silence handling. need 2 times for crossfade purposes
+    silence = np.zeros(int(max_chunk_duration*sampling_rate))
+    memory_with_silence = np.concatenate([memory,silence,silence]) 
+    memory_chunks.extend([silence]*2)
+    
+    
+    #convert queries to timestamps (markers)
+    markers = indexes_to_timestamps(queries,memory_chunks)
+    
+    #create response from queries by concatenating chunks from memory
+    response = concatenate(memory_with_silence, markers, sampling_rate,concat_fade_time,remove,max_backtrack)
+    
+    return response
+
 #TODO : USE SLIDING WINDOW TO GENERATE NEW CHUNKS LABELS WITH SOME CONTEXT
 @torch.no_grad()
 def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2SeqBase,str],
@@ -231,20 +251,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     source = src_ds.native_track
 
     prYellow("Concatenate response...")
-    #create concatenate object
-    concatenate = Concatenator() 
-    
-    #append 2x chunk duration with zeros for silence handling. need 2 times for crossfade purposes
-    silence = np.zeros(int(max_chunk_duration*memory_ds.native_sr))
-    memory_with_silence = np.concatenate([memory,silence,silence]) 
-    memory_chunks.extend([silence]*2)
-    
-    
-    #convert queries to timestamps (markers)
-    markers = indexes_to_timestamps(queries,memory_chunks)
-    
-    #create response from queries by concatenating chunks from memory
-    response = concatenate(memory_with_silence, markers, memory_ds.native_sr,concat_fade_time,remove,max_backtrack)
+    response = concatenate_response(memory,memory_chunks,queries,max_chunk_duration,memory_ds.native_sr,concat_fade_time,remove,max_backtrack)
     
     prYellow("Computing statistics of consecutive segments...")
     lengths = compute_consecutive_lengths(queries)

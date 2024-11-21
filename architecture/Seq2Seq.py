@@ -34,7 +34,7 @@ class PositionalEncoding(nn.Module):
     
     
 
-
+#TODO : IMPLEMENT generate() METHOD FOR FUTURE USE OF SEQUENCE CONTINUATION PREDICTION
 class Seq2SeqBase(nn.Module):
     def __init__(self, localEncoder : LocalEncoder, decisionModule : Decision, max_len, use_special_tokens=True, has_masking=False): 
         super().__init__()
@@ -201,6 +201,89 @@ class Seq2SeqBase(nn.Module):
         src_pad_mask = torch.cat([no_mask_val.expand(B,1),src_pad_mask],dim=1)
         
         return z_src, src_idx, src_pad_mask 
+
+    def _from_index_to_embedding(self,index:int):
+        special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=self.device)
+        
+        if index in special_tokens_idxs:
+            return self.special_token_embeddings(index - self.codebook_size - 1) #embedding table is of len 3 so we need to shift
+
+        else : return self.vocab_embedding_table[index]
+    
+    def from_indexes_to_embeddings(self, indexes : torch.Tensor):
+        special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=self.device)
+        is_special_token = torch.isin(indexes,special_tokens_idxs) #special token positions mask
+        
+        embeddings = torch.empty(size=indexes.shape+(self.dim,),device=self.device)
+        
+        embeddings[~is_special_token] = self.vocab_embedding_table[indexes[~is_special_token]] #insert vocab embedding if idx in vocab range
+        embeddings[is_special_token] = self.special_token_embeddings(indexes[is_special_token] - self.codebook_size - 1) #insert spec token embed if idx in spec tokens idxs
+        
+        return embeddings
+    
+    def _greedy_decoding(self, memory : torch.Tensor, k:int, max_len : int):
+        
+        B = memory.size(0)
+        
+        #init tgt as SOS
+        tgt = self.special_token_embeddings(self.sos).unsqueeze(0).expand(B,1,-1) #(B,1,D)
+        tgt_idx = torch.full((B,1),fill_value=self.special_tokens_idx["sos"],device=self.device) #(B,1)
+        
+        tgt_pad_mask = None #init pad mask as none
+        #next_token = torch.empty((B,self.dim), dtype=tgt.dtype, device=memory.device) #init next token tensor
+        finished = torch.zeros(B, dtype=torch.bool, device=self.device) #mask for finished sequences
+        eos_idx = self.special_tokens_idx["eos"]
+        pad_idx = self.special_tokens_idx["pad"]
+        #special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=self.device) #(3,)
+        if max_len==None : max_len=self.max_len
+        
+        while tgt.size(1)<max_len:
+            
+            tgt_pe = self.pe(tgt) #apply pos encoding (B,T,dim)
+            
+            #create tgt mask
+            tgt_mask = self._create_causal_mask(tgt_pe.size(1))
+            
+            #predict logits
+            logits = self.decision.decode(tgt_pe,memory,tgt_mask,tgt_pad_mask=tgt_pad_mask)[:,-1:,:] #(B,1,vocab_size) only take last step
+                        
+            #top-K random prediction
+            next_token_idx = predict_topK(k,logits).reshape(logits.shape[:-1])[:,-1]  #(B,)
+            
+            #next_token : (B,D)
+            next_token = self.from_indexes_to_embeddings(next_token_idx)
+            
+            #replace finished sequences next token by a pad token/idx
+            next_token_idx[finished] = pad_idx
+            next_token[finished]=self.special_token_embeddings(self.pad)
+            
+            #append next_token to tgt
+            tgt = torch.cat([tgt,next_token.unsqueeze(1)],dim=1) #(B,T+1,D)
+            tgt_idx = torch.cat([tgt_idx,next_token_idx.unsqueeze(1)],dim=1) #(B,T+1)
+            
+            #update padding_mask (B,T)
+            tgt_pad_mask = tgt_idx == pad_idx #padding where tgt_idx is pad
+            
+            #update finished at end
+            finished = finished | (next_token_idx==eos_idx)
+            
+            #break the loop if all sequences came to an end
+            if finished.all():
+                break
+        
+        return tgt, tgt_idx
+    
+    def decode(self, memory : torch.Tensor, k:int, max_len : int, decoding_type : str) -> Tuple[torch.Tensor, torch.Tensor]:
+        if decoding_type == "greedy":
+            tgt, tgt_idx = self._greedy_decoding(memory, k, max_len)
+            
+        elif decoding_type=="beam":
+            tgt, tgt_idx = self._beam_search(memory, k, max_len)
+        
+        else : raise ValueError(f"Wrong 'decodin_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
+        
+        return tgt, tgt_idx
+        
     
     
     
@@ -281,7 +364,8 @@ class Seq2SeqCoupling(Seq2SeqBase):
     
     #generate sequence of labels to "couple" the input sequence of labels (memory)
     @torch.no_grad
-    def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, k:int, max_len : int): #and this pad mask is on chunks dim (after process from encode)
+    def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
+                 k:int, max_len : int, decoding_type : str = 'greedy'): 
         
         src = encoded_src
         
@@ -290,7 +374,9 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         memory = self.decision.encode(src,src_mask=None,src_pad_mask=src_pad_mask) #encode src once -> pass through Transformer encoder if enc-dec else will be = src
         
-        B = memory.size(0)
+        
+        tgt, tgt_idx = self.decode(memory, k, max_len, decoding_type)
+        """ B = memory.size(0)
         
         #init tgt as SOS
         tgt = self.special_token_embeddings(self.sos).unsqueeze(0).expand(B,1,-1) #(B,1,D)
@@ -305,8 +391,9 @@ class Seq2SeqCoupling(Seq2SeqBase):
         if max_len==None : max_len=self.max_len
         
         while tgt.size(1)<max_len:
-            #tgt[:,i:] = self.pe(tgt[:,i:]) #add position to new tokens
+            
             tgt_pe = self.pe(tgt) #apply pos encoding
+            
             #create tgt mask
             tgt_mask = self._create_causal_mask(tgt_pe.size(1))
             
@@ -339,8 +426,9 @@ class Seq2SeqCoupling(Seq2SeqBase):
             #break the loop if all sequences came to an end
             if finished.all():
                 break
+        """
         
-        return tgt, tgt_idx
+        return tgt, tgt_idx 
     
     @torch.no_grad 
     def generate(self,src : torch.Tensor ,src_pad_masks : torch.Tensor, k : int = 1, max_len=None):
@@ -353,3 +441,4 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         
         
+

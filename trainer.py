@@ -218,7 +218,7 @@ class Seq2SeqTrainer(nn.Module):
         #totasl loss = crossentropy + codebook loss + (-entropy)
         loss = (loss_ce + loss_commit - loss_entropy)/self.grad_accum_steps 
         
-        preds = predict_topK(self.k,logits,tgt_out)
+        preds = predict_topK(self.k,logits,tgt_out) #TODO : MODIFIER POUR DECODER BEAM SEARCH
         
         acc = compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=self.model.special_tokens_idx["pad"])
         

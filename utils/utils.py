@@ -188,10 +188,10 @@ def topK_search(k, logits,targets=None):
     return sampled_idx
 
 def predict_topK(k,logits,tgt=None):
-        logits_rs = logits.reshape(-1,logits.size(-1))
-        tgts_rs = tgt.reshape(-1) if tgt!=None else None
-        preds = topK_search(k,logits_rs,tgts_rs)
-        return preds
+    logits_rs = logits.reshape(-1,logits.size(-1))
+    tgts_rs = tgt.reshape(-1) if tgt!=None else None
+    preds = topK_search(k,logits_rs,tgts_rs)
+    return preds
 
 def build_coupling_ds(roots, BATCH_SIZE, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
                     segmentation_strategy="uniform",
