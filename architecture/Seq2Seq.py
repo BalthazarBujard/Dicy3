@@ -6,6 +6,23 @@ from typing import Union,Tuple
 import math
 import time
 from utils.utils import predict_topK
+from beam_search import BeamSearch, Candidate
+from typing import List
+
+
+#TODO : IS THIS FUNCTION A METHOD OF SEQ2SEQBASE ?
+def create_pad_mask(x:torch.Tensor, eos_idx : int):
+    eos_pos = (x==eos_idx)
+    first_eos_pos = torch.argmax(eos_pos.float(),dim=1).unsqueeze(1)
+    no_eos = ~eos_pos.any(dim=1) #finds where there is no eos
+    
+    #create tensor with column indices for optimal pad mask generation
+    col_indices = torch.arange(x.size(1)).unsqueeze(0).expand(x.size(0), -1).to(x.device)
+    
+    pad_mask = col_indices > first_eos_pos #there is padding for the positions greater that the eos token
+    pad_mask[no_eos]=False #if there is no eos padding mask is False
+    pad_mask.to(x.device)
+    return pad_mask
 
 # from https://pytorch.org/tutorials/beginner/transformer_tutorial.html
 # this is a detrrministic positional embedding, another option could be to use a Embeding layer of shape (max_len,embed_dim) that can be learned
@@ -221,7 +238,7 @@ class Seq2SeqBase(nn.Module):
         
         return embeddings
     
-    def _greedy_decoding(self, memory : torch.Tensor, k:int, max_len : int):
+    def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:int, max_len : int):
         
         B = memory.size(0)
         
@@ -245,7 +262,9 @@ class Seq2SeqBase(nn.Module):
             tgt_mask = self._create_causal_mask(tgt_pe.size(1))
             
             #predict logits
-            logits = self.decision.decode(tgt_pe,memory,tgt_mask,tgt_pad_mask=tgt_pad_mask)[:,-1:,:] #(B,1,vocab_size) only take last step
+            logits = self.decision.decode(tgt_pe,memory,tgt_mask,
+                                          tgt_pad_mask=tgt_pad_mask,
+                                          memory_pad_mask=memory_pad_mask)[:,-1:,:] #(B,1,vocab_size) only take last step
                         
             #top-K random prediction
             next_token_idx = predict_topK(k,logits).reshape(logits.shape[:-1])[:,-1]  #(B,)
@@ -273,12 +292,76 @@ class Seq2SeqBase(nn.Module):
         
         return tgt, tgt_idx
     
-    def decode(self, memory : torch.Tensor, k:int, max_len : int, decoding_type : str) -> Tuple[torch.Tensor, torch.Tensor]:
+    # beam search transition function : computes the probabilities over the state space given an input sequence of states 
+    def __beam_search_transition_fn(self,candidates: List[List[Candidate]], 
+                                    memory : torch.Tensor, 
+                                    memory_mask : torch.Tensor) -> torch.Tensor:
+        
+        B,T_src,dim=memory.shape
+        beam_width = len(candidates[0])
+        
+        #get sequence of states from eahc candidate
+        states = torch.tensor(
+            [[candidate.states for candidate in candidates_batch] for candidates_batch in candidates],
+                              device=self.device
+                              ) #(B, beam_width,T)
+        
+        #expand memory to match states shape
+        memory = memory.unsqueeze(1).repeat(1,beam_width,1,1) #(B, beam_width, T_src,dim)
+        memory_mask = memory_mask.unsqueeze(1).repeat(1,beam_width,1,1) #idem
+        
+        #reshape
+        states = states.contiguous().view(B*beam_width,-1) #(B*beam_width,T)
+        memory = memory.contiguous().view(B*beam_width,T_src,dim) #(B*beam_width,T_src,dim)
+        
+        #convert states to vectors
+        tgt = self.from_indexes_to_embeddings(states) #(B*beam_width,T,dim)
+        tgt_pe = self.pe(tgt) #apply positional encoding
+        
+        #generate tgt masks
+        tgt_mask = self._create_causal_mask(tgt_pe.size(1))
+        tgt_pad_mask = create_pad_mask(states, self.special_tokens_idx['eos'].item())
+        
+        #we dont need to update directlz the states after eos it can be done outside the transition_fn.
+        #what matters is the generation of the padding mask to correctly generate representations with attention
+        
+        logits = self.decision.decode(tgt_pe, memory, 
+                                      tgt_mask, 
+                                      tgt_pad_mask=tgt_pad_mask,
+                                      memory_pad_mask=memory_mask) # (B*beam_width,T,vocab_size) 
+        
+        logits = logits.view(B,beam_width,logits.size(1), logits.size(2)) #(B,beam_width,T,vocab_size)
+        
+        #only take last step for each elem in batch and beam
+        probs = torch.softmax(logits,dim=-1)[:,:,-1,:] #(B,beam_width,vocab_size)
+        
+        #print(probs.shape)
+            
+        return probs
+
+    
+    def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k : int, max_len : int):
+        
+        B = memory.size(0)
+        
+        x_init = torch.tensor([[self.special_tokens_idx['sos'].item()] for _ in range(B)], device=self.device)
+        eos = self.special_tokens_idx['eos'].item()
+        
+        fn_args = {'memory':memory, 'memory_mask':memory_pad_mask}
+
+        beamsearch = BeamSearch(self.__beam_search_transition_fn, fn_args, terminal_state = eos)
+
+        best_candidates = beamsearch(x_init, k, max_len)
+
+    
+    def decode(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor,
+               k:int, max_len : int, decoding_type : str) -> Tuple[torch.Tensor, torch.Tensor]:
+        
         if decoding_type == "greedy":
-            tgt, tgt_idx = self._greedy_decoding(memory, k, max_len)
+            tgt, tgt_idx = self._greedy_decoding(memory, memory_pad_mask, k, max_len)
             
         elif decoding_type=="beam":
-            tgt, tgt_idx = self._beam_search(memory, k, max_len)
+            tgt, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len)
         
         else : raise ValueError(f"Wrong 'decodin_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
         
@@ -348,6 +431,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         return out, tgt, tgt_idx, codebook_loss #return predictions and encoded target sequence for loss computing
     
+    #TODO : MOVE ENCODE TO BASE CLASS
     #encode input sequence --> assign labels (codebook index,..)
     @torch.no_grad
     def encode(self, src, src_pad_masks): #needs both pad masks
@@ -375,58 +459,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
         memory = self.decision.encode(src,src_mask=None,src_pad_mask=src_pad_mask) #encode src once -> pass through Transformer encoder if enc-dec else will be = src
         
         
-        tgt, tgt_idx = self.decode(memory, k, max_len, decoding_type)
-        """ B = memory.size(0)
-        
-        #init tgt as SOS
-        tgt = self.special_token_embeddings(self.sos).unsqueeze(0).expand(B,1,-1) #(B,1,D)
-        tgt_idx = torch.full((B,1),fill_value=self.special_tokens_idx["sos"],device=memory.device) #(B,1)
-        
-        tgt_pad_mask = None #init pad mask as none
-        next_token = torch.empty((B,self.dim), dtype=tgt.dtype, device=memory.device) #init next token tensor
-        finished = torch.zeros(B, dtype=torch.bool, device=memory.device) #mask for finished sequences
-        eos_idx = self.special_tokens_idx["eos"]
-        pad_idx = self.special_tokens_idx["pad"]
-        special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=memory.device) #(3,)
-        if max_len==None : max_len=self.max_len
-        
-        while tgt.size(1)<max_len:
-            
-            tgt_pe = self.pe(tgt) #apply pos encoding
-            
-            #create tgt mask
-            tgt_mask = self._create_causal_mask(tgt_pe.size(1))
-            
-            #predict logits
-            logits = self.decision.decode(tgt_pe,memory,tgt_mask,tgt_pad_mask=tgt_pad_mask) #(B,T,vocab_size)
-                        
-            #top-K random prediction
-            next_token_idx = predict_topK(k,logits).reshape(logits.shape[:-1])[:,-1] #ONLY TAKE LAST PREDICTION
-            
-            #next_token : (B,D)
-            is_special_token = torch.isin(next_token_idx,special_tokens_idxs) #special token positions mask
-
-            next_token[~is_special_token] = self.vocab_embedding_table[next_token_idx[~is_special_token]] #insert vocab embedding if idx in vocab range
-            next_token[is_special_token] = self.special_token_embeddings(next_token_idx[is_special_token] - self.codebook_size - 1) #insert spec token embed if idx in spe tokens idxs
-            
-            #replace finished sequences next token by a pad token/idx
-            next_token_idx[finished] = pad_idx
-            next_token[finished]=self.special_token_embeddings(self.pad)
-            
-            #append next_token to tgt
-            tgt = torch.cat([tgt,next_token.unsqueeze(1)],dim=1) #(B,T,D)
-            tgt_idx = torch.cat([tgt_idx,next_token_idx.unsqueeze(1)],dim=1) #(B,T)
-            
-            #update padding_mask (B,T)
-            tgt_pad_mask = tgt_idx == pad_idx #padding where tgt_idx is pad
-            
-            #update finished at end
-            finished = finished | (next_token_idx==eos_idx)
-            
-            #break the loop if all sequences came to an end
-            if finished.all():
-                break
-        """
+        tgt, tgt_idx = self.decode(memory, src_pad_mask, k, max_len, decoding_type)
         
         return tgt, tgt_idx 
     
