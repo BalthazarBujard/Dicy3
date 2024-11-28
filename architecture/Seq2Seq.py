@@ -308,11 +308,12 @@ class Seq2SeqBase(nn.Module):
         
         #expand memory to match states shape
         memory = memory.unsqueeze(1).repeat(1,beam_width,1,1) #(B, beam_width, T_src,dim)
-        memory_mask = memory_mask.unsqueeze(1).repeat(1,beam_width,1,1) #idem
+        memory_mask = memory_mask.unsqueeze(1).repeat(1,beam_width,1) #(B,beam_width,T_src)
         
         #reshape
         states = states.contiguous().view(B*beam_width,-1) #(B*beam_width,T)
         memory = memory.contiguous().view(B*beam_width,T_src,dim) #(B*beam_width,T_src,dim)
+        memory_mask = memory_mask.contiguous().view(B*beam_width,T_src) #(B*beam_width,T_src)
         
         #convert states to vectors
         tgt = self.from_indexes_to_embeddings(states) #(B*beam_width,T,dim)
@@ -354,7 +355,7 @@ class Seq2SeqBase(nn.Module):
         best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
         
         #convert candidates to states and embeddings
-        tgt_idx = torch.tensor([[c.states for c in nbest_candidates] for nbest_candidates in best_candidates],device=self.device)
+        tgt_idx = torch.tensor([[c.states for c in nbest_candidates] for nbest_candidates in best_candidates],device=self.device).squeeze(1) #remove extra dimension
         tgt = self.from_indexes_to_embeddings(tgt_idx)
         
         return tgt, tgt_idx
@@ -369,7 +370,7 @@ class Seq2SeqBase(nn.Module):
         elif decoding_type=="beam":
             tgt, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len)
         
-        else : raise ValueError(f"Wrong 'decodin_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
+        else : raise ValueError(f"Wrong 'decoding_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
         
         return tgt, tgt_idx
         
@@ -455,7 +456,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
     #generate sequence of labels to "couple" the input sequence of labels (memory)
     @torch.no_grad
     def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
-                 k:int, max_len : int, decoding_type : str = 'greedy'): 
+                 k:int, max_len : int, decoding_type : str): 
         
         src = encoded_src
         

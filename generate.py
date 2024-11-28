@@ -11,7 +11,7 @@ import argparse
 from librosa import load
 
 
-def generate_examples(model_ckp,with_coupling,remove,k,fade_time,num_examples,data,save_dir):
+def generate_examples(model_ckp,with_coupling,remove,k, decoding_type,fade_time,num_examples,data,save_dir):
     model, params = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -65,7 +65,9 @@ def generate_examples(model_ckp,with_coupling,remove,k,fade_time,num_examples,da
             memory = tracks[id] 
             src = [tracks[i] for i in range(len(tracks)) if i != id ]
 
-            output = generate(memory,src,model,k,with_coupling,MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
+            output = generate(memory,src,model,k,with_coupling,decoding_type,
+                            MAX_TRACK_DURATION,MAX_CHUNK_DURATION,
+                            track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
                             concat_fade_time=fade_time,
                             remove=remove,
@@ -88,14 +90,15 @@ def generate_examples(model_ckp,with_coupling,remove,k,fade_time,num_examples,da
             memory = tracks[id] 
             src = [tracks[i] for i in range(len(tracks)) if i != id ]
 
-            output = generate(memory,src,model,k,with_coupling,MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
+            output = generate(memory,src,model,k,with_coupling, decoding_type,
+                            MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
                             concat_fade_time=fade_time,
                             remove=remove,
                             save_dir=save_dir,
                             device=DEVICE)
             
-def generate_example(model_ckp,memory,src,with_coupling,remove,k,fade_time,save_dir,smaller=True,max_duration=60.):
+def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type,fade_time,save_dir,smaller=True,max_duration=60.):
     model, params = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -116,7 +119,8 @@ def generate_example(model_ckp,memory,src,with_coupling,remove,k,fade_time,save_
         timestamps = [t0/sr,t1/sr] #in seconds
     else : timestamps=None
     
-    output = generate(memory,src,model,k,with_coupling,MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
+    output = generate(memory,src,model,k,with_coupling,decoding_type,
+                      MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
                             concat_fade_time=fade_time,
                             remove=remove, timestamps=timestamps,
@@ -135,6 +139,7 @@ if __name__=='__main__':
     parser.add_argument('-td',"--track_duration",type=float) """
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
+    parser.add_argument("--decoding_type", type = str, choices=['greedy','beam'])
     parser.add_argument("--k",type=float,default=0.1)
     parser.add_argument('--fade_time',type=float,default=0.04)
     parser.add_argument("--num_examples",type=int)
@@ -161,11 +166,11 @@ if __name__=='__main__':
     for model_ckp in file_ckps:
         print("Generating with model :",os.path.basename(model_ckp))
         if args.data!=None:
-            generate_examples(model_ckp,with_coupling,args.remove,args.k,
+            generate_examples(model_ckp,with_coupling,args.remove,args.k, args.decoding_type,
                     fade_time=args.fade_time,num_examples=args.num_examples,data=args.data,save_dir=save_dir)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model_ckp,args.memory,args.source,
-                            args.with_coupling,args.remove,args.k,args.fade_time,
+                            args.with_coupling,args.remove,args.k,args.decoding_type,args.fade_time,
                             save_dir)
         else : raise ValueError("Either specify 'data' or give a source and memory path")
