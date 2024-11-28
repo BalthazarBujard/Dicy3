@@ -83,7 +83,7 @@ class Seq2SeqBase(nn.Module):
             for token_idx, attr in enumerate(self.special_tokens):
                 self.register_buffer(attr, torch.tensor(token_idx)) #needed in state dict but not trainable. used for embedding retrieval
                 extra_tokens+=1
-                self.special_tokens_idx[attr]=torch.tensor(self.codebook_size+extra_tokens) #maybe need to convert to float and send to device here
+                self.special_tokens_idx[attr]=torch.tensor(self.codebook_size+extra_tokens-1) #maybe need to convert to float and send to device here
         
         self.vocab_embedding_table = self.encoder.quantizer.codebook #contains only the vocabulary (not the special tokens)
         
@@ -229,12 +229,14 @@ class Seq2SeqBase(nn.Module):
     
     def from_indexes_to_embeddings(self, indexes : torch.Tensor):
         special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=self.device)
+        print(special_tokens_idxs)
         is_special_token = torch.isin(indexes,special_tokens_idxs) #special token positions mask
+        print(is_special_token)
         
         embeddings = torch.empty(size=indexes.shape+(self.dim,),device=self.device)
         
         embeddings[~is_special_token] = self.vocab_embedding_table[indexes[~is_special_token]] #insert vocab embedding if idx in vocab range
-        embeddings[is_special_token] = self.special_token_embeddings(indexes[is_special_token] - self.codebook_size - 1) #insert spec token embed if idx in spec tokens idxs
+        embeddings[is_special_token] = self.special_token_embeddings(indexes[is_special_token] - self.codebook_size) #insert spec token embed if idx in spec tokens idxs
         
         return embeddings
     
