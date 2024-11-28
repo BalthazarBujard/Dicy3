@@ -351,7 +351,13 @@ class Seq2SeqBase(nn.Module):
 
         beamsearch = BeamSearch(self.__beam_search_transition_fn, fn_args, terminal_state = eos)
 
-        best_candidates = beamsearch(x_init, k, max_len)
+        best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
+        
+        #convert candidates to states and embeddings
+        tgt_idx = torch.tensor([[c.states for c in nbest_candidates] for nbest_candidates in best_candidates],device=self.device)
+        tgt = self.from_indexes_to_embeddings(tgt_idx)
+        
+        return tgt, tgt_idx
 
     
     def decode(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor,
