@@ -229,9 +229,7 @@ class Seq2SeqBase(nn.Module):
     
     def from_indexes_to_embeddings(self, indexes : torch.Tensor):
         special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=self.device)
-        print(special_tokens_idxs)
         is_special_token = torch.isin(indexes,special_tokens_idxs) #special token positions mask
-        print(is_special_token)
         
         embeddings = torch.empty(size=indexes.shape+(self.dim,),device=self.device)
         
