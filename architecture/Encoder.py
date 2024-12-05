@@ -8,7 +8,8 @@ import math
 from utils.utils import *
 from typing import Union, List, Tuple
 
-
+# TODO : AJOUTER UN ARGUMENT POUR LE CAS OU ON FERAIT DU PRETRAIN DU BACKBONE, DANS CE CAS L'ARGUMENT MASK DOIT ETRE A TRUE MAIS DANS LE CAS GENERAL DE NOTRE APPLICATION 
+# ON NE PREVOIT PAS DE FAIRE D EPRE-TRAIN MAIS SIMPLEMENT DE L'ADAPTATION
 class Backbone(nn.Module):
     """_summary_
 
@@ -75,6 +76,8 @@ class Backbone(nn.Module):
             if isinstance(self.backbone, transformers.Wav2Vec2ForPreTraining):
                 if padding_mask!=None :
                     raise RuntimeError("Not sure if padding mask should be given to HF model...")
+                
+                #on dirait que le wav2vec de HF ne fait pas directement dans le forward le maskage des timesteps donc pas besoin de modifier.
                 outputs = self.backbone(x, output_hidden_states=True)
                 z = outputs.hidden_states[-1]
                 #TODO: POUR PASSER DE 768 A 256 UTILISER outputs.projected_states et 
@@ -83,7 +86,9 @@ class Backbone(nn.Module):
             elif isinstance(self.backbone, fairseq.models.wav2vec.wav2vec2.Wav2Vec2Model):
                 #TODO : POUR PASSER DE 768 A 256 UTILISER outputs['projected_states'] et enlever features_only=True
                 #z = outputs['projected_states']
-                outputs = self.backbone(x, features_only=True, padding_mask=padding_mask)
+                
+                #arg 'mask' determines wether to mask timesteps so if we are not in training we do not want to mask inputs
+                outputs = self.backbone(x, features_only=True, padding_mask=padding_mask, mask=False) 
                 z = outputs['x']
             
             else :
@@ -103,7 +108,7 @@ class Backbone(nn.Module):
             z = F.max_pool1d(z,z.size(-1)) #max_pool over all timesteps
             z = z[...,0] #remove time dimension
 
-        #(B,D)
+        #(B,D) if mean or pooling, else (B,L,D)
         
         return z
 
