@@ -97,14 +97,18 @@ class Backbone(nn.Module):
             elif isinstance(self.backbone, fairseq.models.wav2vec.wav2vec2.Wav2Vec2Model):
                 #TODO : POUR PASSER DE 768 A 256 UTILISER outputs['projected_states'] et enlever features_only=True
                 #z = outputs['projected_states']
-                if self.output_final_proj:
-                    outputs = self.backbone(x, features_only=False, padding_mask=padding_mask, mask=False)
-                    z=outputs['projected_states']
+                # if self.output_final_proj:
+                #     outputs = self.backbone(x, features_only=False, padding_mask=padding_mask, mask=False)
+                #     z=outputs['projected_states']
                 
-                else :
-                    #arg 'mask' determines wether to mask timesteps so if we are not in training we do not want to mask inputs
-                    outputs = self.backbone(x, features_only=True, padding_mask=padding_mask, mask=False) 
-                    z = outputs['x']
+                #else :
+                #arg 'mask' determines wether to mask timesteps so if we are not in training we do not want to mask inputs
+                outputs = self.backbone(x, features_only=True, padding_mask=padding_mask, mask=False) 
+                z = outputs['x']
+                
+                #il faut proceder comme ca sinon le projected states c'est la sortie de la cosine sim entre y et x... (a priori en regardant le code)
+                if self.output_final_proj:
+                    z = self.backbone.final_proj(z)
             
             else :
                 str="The wav2vec pretrained backbone of type" + str(type(self.backbone)) + "is not supported.\

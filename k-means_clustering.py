@@ -49,7 +49,7 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
 
     roots = [f"/data3/anasynth_nonbp/bujard/data/{root}" for root in folders]
 
-    max_duration=10 #the longer the sequence the better
+    max_duration=5 #the longer the sequence the better
     sr=16000
     segmentation_strategy="sliding" #normally this doesnt affect the kmeans centers since we use the codes from the finest resolution (output of w2v)
 
@@ -59,9 +59,9 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
     # %%
     # dataloader
     batch_size=64
-    
-    #TODO : CHANGE COLLATOR TO OUR MUSICDATACOLLATOR
-    collate_fn=MusicDataCollator(unifrom_chunks=segmentation_strategy!='onset') #DataCollatorForWav2Vec2(model.backbone,feature_extractor,split="test")
+    feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
+    #TODO : CHANGE COLLATOR TO OUR MUSICDATACOLLATOR. -> IT DOESNT WORK WITH MUSICCONTAINER AS IS
+    collate_fn=DataCollatorForWav2Vec2(model.backbone,feature_extractor,split="test")
     
     loader = DataLoader(ds,batch_size,shuffle=True,collate_fn=collate_fn)
     fetcher=Fetcher(loader)
@@ -75,17 +75,12 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
     for codebook_size in codebook_sizes:
         torch.cuda.empty_cache() #free cached ememory ?
         
-        prYellow(f"instanciating kmeans with vocab size = {codebook_size} (aka numbr of centers)")
+        prYellow(f"instanciating kmeans with vocab size = {codebook_size} (aka numbr of centers) and dim {dim}")
         k_means=MiniBatchKMeans(codebook_size,batch_size=k_means_batch_size,random_state=42)
-
-        #GPU kmeans needs too much ressources to have a decent codebook size
-        #kmeans=KMeans(n_clusters=codebook_size) 
-        #kmeans.to(DEVICE)
-        #kmeans.train()
 
         #%%
         #fit kmeans to data
-        epochs=3
+        epochs=1
         bar=tqdm(range(epochs*len(fetcher)))
         old_centers = np.zeros((codebook_size,model.dim))
         for epoch in range(epochs):
@@ -117,7 +112,7 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
             #save centers for later use as VQ at end of epoch
             centers=k_means.cluster_centers_
             prYellow(f"Saving kmeans centers...")
-            np.save(f"clustering/kmeans_centers_{codebook_size}.npy",centers,allow_pickle=True)
+            np.save(f"clustering/kmeans_centers_{codebook_size}_{dim}.npy",centers,allow_pickle=True)
             
 
 
@@ -129,12 +124,13 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
 if __name__=="__main__":   
     
     codebook_sizes = [2**n for n in range(4,11)]
-    dim=768
-    #generate_codebook([512,1024])
+    dim=256
+    
+    generate_codebook(codebook_sizes,dim)
 
-    for codebook_size in codebook_sizes:
-        prGreen(f"Generating kmeans VQ with {codebook_size} centers of dim {dim}")
-        generate_codebook(codebook_size, dim)
+    # for codebook_size in codebook_sizes:
+    #     prGreen(f"Generating kmeans VQ with {codebook_size} centers of dim {dim}")
+    #     generate_codebook(codebook_size, dim)
 
     
 
