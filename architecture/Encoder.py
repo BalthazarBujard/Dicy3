@@ -38,6 +38,10 @@ class Backbone(nn.Module):
                    
         return embed_dim       
     
+    @property
+    def device(self):
+        return next(self.parameters()).device
+    
     def freeze(self):
         self.backbone.requires_grad_(False)
     
@@ -64,6 +68,8 @@ class Backbone(nn.Module):
     def mean(self):
         return self.__mean
     
+    #TODO: DANS LA DOCUMENTATION DE HUGGING FACE ILS DISENT QUE LE WAV2VEC BASE A DES MEILEURS RESULTATS
+    # SI EN INFERENCE ON DONNE PAS DE PAD MASK
     def forward(self, x, padding_mask=None):
         if self.type=="w2v":
             if isinstance(self.backbone, transformers.Wav2Vec2ForPreTraining):
@@ -71,8 +77,12 @@ class Backbone(nn.Module):
                     raise RuntimeError("Not sure if padding mask should be given to HF model...")
                 outputs = self.backbone(x, output_hidden_states=True)
                 z = outputs.hidden_states[-1]
+                #TODO: POUR PASSER DE 768 A 256 UTILISER outputs.projected_states et 
+                # peut etre pas besoin de output_hidden_states=True
             
             elif isinstance(self.backbone, fairseq.models.wav2vec.wav2vec2.Wav2Vec2Model):
+                #TODO : POUR PASSER DE 768 A 256 UTILISER outputs['projected_states'] et enlever features_only=True
+                #z = outputs['projected_states']
                 outputs = self.backbone(x, features_only=True, padding_mask=padding_mask)
                 z = outputs['x']
             
@@ -96,7 +106,8 @@ class Backbone(nn.Module):
         #(B,D)
         
         return z
-                
+
+#TODO : DOUBLE CHECK IF THIS IMPLEMENTATION IS CORRECT ESPECIALLY THE CREATE_MASK METHOD                
 class TransformerEncoderBloc(nn.Module):
     def __init__(self,embed_dim=768, 
                  num_heads=12, dropout=0.2, inner_dim=2048,
@@ -167,13 +178,14 @@ class TransformerEncoderBloc(nn.Module):
 class LocalEncoder(nn.Module):
     def __init__(self, pretrained_encoder : Backbone, quantizer : nn.Module,
                  head_module : str = "mean", condense_type=None, embed_dim : int = 768, 
-                 num_heads : int = 8, dropout : float = 0.1, inner_dim : int = 2048):
+                 num_heads : int = 8, dropout : float = 0.1, inner_dim : int = 2048, chunking_pre_post_encoding : str = "pre"):
         
         super().__init__()
         self.encoder = pretrained_encoder
         
         assert self.encoder.mean==False, "Backbone should return a sequence but backbone.mean=True !"
         assert head_module in ["attention", "pooling", "mean"], "head module accepts only 'attention' for MHA, 'pooling' for simple max pooling or 'mean'  as choices."
+        assert chunking_pre_post_encoding in ["pre", "post"], "Wrong argument, choose between 'pre' and 'post"
         
         self.head_module=head_module
         self.condense_type = condense_type
@@ -189,10 +201,13 @@ class LocalEncoder(nn.Module):
             
             self.transformerbloc = TransformerEncoderBloc(embed_dim,num_heads,dropout,inner_dim,condense_type)
         
+        self.chunking_pre_post_encoding = chunking_pre_post_encoding #order to follow for chunking -> before or after encoding
+        
         self.embed_dim=embed_dim    
         
         self.quantizer = quantizer
-        self.dim = quantizer.dim        
+        self.dim = quantizer.dim       
+        
         #self.out_proj=nn.Linear(embed_dim,self.dim) if self.dim != embed_dim else nn.Identity()
     
     #collapse information accross time dimension
@@ -219,8 +234,9 @@ class LocalEncoder(nn.Module):
         return x
     
     # computes padding mask after encoding (subsampling)
-    #works with fairseq
-    def _process_padding_mask(self, x, padding_mask):
+    # works with fairseq
+    #from https://github.com/facebookresearch/fairseq/blob/main/fairseq/models/wav2vec/wav2vec2.py line 623
+    def _process_padding_mask(self, x : torch.Tensor, padding_mask : torch.Tensor) -> torch.Tensor:
         if padding_mask is not None and padding_mask.any():
             input_lengths = (1 - padding_mask.long()).sum(-1)
             # apply conv formula to get real output_lengths
@@ -241,7 +257,7 @@ class LocalEncoder(nn.Module):
             padding_mask = (1 - padding_mask.flip([-1]).cumsum(-1).flip([-1])).bool()
             
         else :
-            padding_mask=None
+            padding_mask=torch.zeros(x.shape[:2],device=x.device).bool()
         
         return padding_mask
     
@@ -253,13 +269,46 @@ class LocalEncoder(nn.Module):
             raise ValueError(f"The input tensor x has not the expected shape of (batch,chunks,samples) but has shape {x.shape}")
         
         B,chunks,max_samples = x.shape
-        x = x.contiguous().view(-1,max_samples) #first reshape as B*chunks, max_samples for backbone compatibility
-        padding_mask = padding_mask.contiguous().view(-1,max_samples) if padding_mask!=None else None
         
-        x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B*chunks,L,D) L<<max_samples
+        if self.chunking_pre_post_encoding == "pre":
+            x = x.contiguous().view(-1,max_samples) #first reshape as B*chunks, max_samples for backbone compatibility
+            padding_mask = padding_mask.contiguous().view(-1,max_samples) if padding_mask!=None else None
+            
+            x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B*chunks,L,D) L<<max_samples
+            
+            #process padding mask
+            padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L)
         
-        #process padding mask
-        padding_mask = self._process_padding_mask(x, padding_mask)
+        
+        else : #post-chunking
+            x = x.contiguous().view(B,-1) #first reshape as B, chunks*max_samples for backbone compatibility
+            padding_mask = padding_mask.contiguous().view(B,-1) if padding_mask!=None else None
+            
+            x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B,L,D) L<<max_samples*chunks
+            
+            #reshape and process mask more complicated for post-chunkingf
+            T = torch.ceil(torch.tensor(x.size(1)/chunks)).int()
+            #the total duration of the sequence
+            new_L = chunks*T
+            #pad length to have new_L
+            pad = new_L-x.size(1)
+            x = torch.cat([x,torch.zeros((x.size(0),pad,x.size(-1)),device=x.device)],dim=1)
+            #reshape as B*chunks, T, D
+            x=x.view(B*chunks,-1,x.size(-1))
+
+
+            #process mask with new padded x
+            padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
+            #process mask with x without the padding -> avoid appending True to mask where it shouldnt
+            #and len of x[:,:-pad] is equivalent to the output length of max_samples
+            padding_mask = self._process_padding_mask(x[:,:-pad], padding_mask) #(B*chunks,L')
+            padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L') for easier append of pad mask
+            pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
+            pad_step_mask[:,-1]=True #the last 'pad' steps of the last chunk are padded
+            padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,T)
+            padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, T            
+
+        
         
         x = self.collapse(x, padding_mask)
     

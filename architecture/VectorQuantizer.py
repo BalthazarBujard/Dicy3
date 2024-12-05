@@ -16,6 +16,7 @@ class KmeansQuantizer(nn.Module):
         
         self.codebook_size=len(centers)
         self.centers=centers #DONT KNOW IF GOOD IDEA TO DO THIS ? COULD LEAD TO GRADIENT PROBLEM
+        
         if dim==centers.size(-1):
             self.codebook=nn.Parameter(centers,requires_grad=learnable_codebook) #(vocab_size,dim)
             self.dim=centers.size(-1)
@@ -35,7 +36,7 @@ class KmeansQuantizer(nn.Module):
         
         self.restart = restart
         #self.codebook_usage = torch.zeros(self.codebook_size,dtype=torch.float32) 
-        self.register_buffer('codebook_usage',torch.zeros(self.codebook_size))
+        self.codebook_usage = torch.zeros(self.codebook_size)#register_buffer('codebook_usage',torch.zeros(self.codebook_size))
         self.decay = 0.99
         self.beta = 0.25
     
@@ -48,18 +49,13 @@ class KmeansQuantizer(nn.Module):
             self.codebook_usage[indexes]=1. #restart usage count
             self.codebook[indexes] = new_codevectors  # Avoids gradient tracking
     
+    # TODO : USE CODEBOOK TEMPERATURE FOR SELECTION -> INCREMENT DIVERSITY
     def forward(self, x : torch.Tensor, sample_codebook_temp=0.):
         size=x.size()
         
         if len(size)==3 :
             B,L,_=size
             x=x.contiguous().view(B*L,-1) #(B*L,D)
-        
-        
-        #easy distance
-        #dist = (torch.sum((self.codebook-x.unsqueeze(1))**2,dim=-1))**0.5
-        #idx = torch.argmin(dist,dim=-1)
-        #xq = self.codebook[idx]
         
         #optimized calculation ||codebook - x||^2 = ||x||^2+||cb||^2 -2*(x*cb)
         dist = - torch.sum(x.detach() ** 2, dim=1, keepdim=True) - \
@@ -93,29 +89,9 @@ class KmeansQuantizer(nn.Module):
 
             if self.restart:
                 #codebook restart only during training
-                #counts = torch.bincount(idx.reshape(-1),minlength=self.codebook_size)
-                #probs = (counts/torch.sum(counts))
                 
                 probs = encodings.mean(dim=0) #avg count of used encodings
                 self.codebook_usage.mul_(self.decay).add_(probs, alpha=(1-self.decay)) #moving average update
-                
-                #old restart
-                """ 
-                #get indices where usage is below thershold
-                restart_idxs = torch.argwhere(self.codebook_usage<self.restart_thresh).reshape(-1)
-                if len(restart_idxs)>0:
-                    print("Restart Codebook")
-                    
-                    #sample random vectors from the encoder
-                    perm = torch.randperm(x.size(0))
-                    new_codevectors = x[perm[:len(restart_idxs)]] #pick N vectors from the batch
-                    
-                    # Ensure that the lengths match --> TODO : FIND WHY ???
-                    if len(new_codevectors) == len(restart_idxs):
-                        self.restart_codebook(restart_idxs, new_codevectors)
-                    #else:
-                    #    raise ValueError(f"Shape mismatch: new_codevectors of shape {new_codevectors.shape} cannot be broadcast to indexing result of shape {restart_idxs.shape}\n{restart_idxs}")
-                """
                 
                 _,indices = dist.sort(dim=0) #get closest z's to embeddings
                 new_features = x.detach()[indices[-1,:]]
@@ -138,7 +114,7 @@ class KmeansQuantizer(nn.Module):
 
 #general vector quantizer from lucidrains repo with some modifications for our purposes
 
-#raises problems with whole model (CUDA kernel problem) -> directly kmodified ludicrains vectorquantize
+#raises problems with whole model (CUDA kernel problem) -> directly modified ludicrains vectorquantize
 # class VectorQuantizer(nn.Module):
 #     def __init__(self,
 #                 dim,

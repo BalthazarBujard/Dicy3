@@ -525,7 +525,7 @@ class MusicContainerPostChunk(MusicContainer):
         #find onset points with backtrack for better segmentation
         #onset = onset_detect(y=track,sr=self.sampling_rate,backtrack=True,normalize=True,units='samples')
         y = resample(track,orig_sr=self.sampling_rate,target_sr=44100) #resample for essentia onset segmentation (optimized for 44.1khz)
-        onset = detect_onsets(y,44100,with_backtrack=True) #in seconds
+        onset = detect_onsets(y,44100,with_backtrack=True)[1] #in seconds
         onset = (onset*self.sampling_rate).astype(int) #in samples of original tracks
         
         #remove doubles
@@ -535,7 +535,7 @@ class MusicContainerPostChunk(MusicContainer):
         onset = np.concatenate([[0],onset, [len(track)]])
         
         #handle too long onsets. min is given by resolution of wav2vec but not used
-        onset = process_onsets(onset,min_duration=None,max_duration=int(self.max_duration*self.sampling_rate))
+        onset = process_onsets(onset,min_duration=int(MIN_RESOLUTION*self.sampling_rate),max_duration=int(self.max_duration*self.sampling_rate))
         #chunks 
         chunks = [track[int(t0):int(t1)] for t0,t1 in zip(onset[:-1],onset[1:])] #returned as list cuz inhomogenous
         
@@ -746,61 +746,6 @@ class MusicContainer4dicy2(Dataset):
             raise ValueError(f"Invalid segmentation strategy argument {strategy}.")
         
         return chunks
-
-    
-    
-""" class MusicCouplingDataset(Dataset):
-    def __init__(self,root_1, root_2, max_track_duration, max_chunk_duration, sampling_rate, segmentation_startegy="uniform", verbose=False):
-        super().__init__()
-        
-        self.sampling_rate=sampling_rate
-        self.max_chunk_duration=max_chunk_duration
-        self.max_track_duration=max_track_duration
-        self.verbose=verbose
-        self.segmentation_strategy = segmentation_startegy
-        
-        if (self.max_chunk_duration*self.sampling_rate)%1!=0 :
-            raise ValueError(f"max_duration = {self.max_chunk_duration} is incompatible with sampling rate.\n This error is due to a resolution problem.")
-        
-        #instanciate 2 musicContainersPostChunk with input and tgt root        
-        self.container1 = MusicContainerPostChunk(root_1,max_track_duration,max_chunk_duration,
-                                                  sampling_rate,segmentation_startegy) #chunks tracks by max_track_duration to reduce GPU memory consumption
-        self.container2 = MusicContainerPostChunk(root_2,max_track_duration,max_chunk_duration,
-                                                  sampling_rate,segmentation_startegy)
-        
-        self.sort_containers() #CAREFULL ONLY WORKS IF BOITH CONTAINERS HAVE TRACK NAMES WITH SIMILAR STRUCTURE. ok for clement cannone duos and trios
-        
-        self.augment_inverse_tracks()
-        
-        assert len(self.container1.audio_paths)==len(self.container2.audio_paths), "There should be the same number of tracks for input and target."
-        
-    def __len__(self):
-        return len(self.container1)
-    
-    def __getitem__(self, index) :
-        #get pair of tracks
-        input_chunks, _ = self.container1[index]
-        target_chunks, _ = self.container2[index]
-        
-        return input_chunks, target_chunks
-      
-    #CAREFUL THIS METHOD ONLY WORKS FOR PAIRING TRACKS OF SAME NAME !!!!
-    #when using going further in implementation find algorithm for correctly sorting conatiners by pair of tracks and then do mix-match augmentastion
-    def sort_containers(self):
-        self.container1.track_chunks = sorted(self.container1.track_chunks, key = lambda x : (os.path.basename(x[0]),x[1]))   #sort by name then by start time
-        self.container2.track_chunks = sorted(self.container2.track_chunks, key = lambda x : (os.path.basename(x[0]),x[1]))
-    
-    # TODO : Implement method for data augmentation --> create more pairs of tracks from the original pairs and evaluate the validity of that augemtation
-
-    def augment_inverse_tracks(self):
-        #add the tracks of congtainer1 to container2 and vice versa
-        container1_track_chunks = self.container1.track_chunks.copy()
-        container2_track_chunks = self.container2.track_chunks.copy()
-                
-        self.container1.track_chunks += container2_track_chunks
-        self.container2.track_chunks += container1_track_chunks
-        """ 
-        
         
 #cette class est une extension de de la v1 --> recoit pas une paire de root mais une liste de N roots --> generere N paires de stem vs mix
 class MusicCouplingDatasetv2(Dataset):
@@ -861,9 +806,11 @@ class MusicCouplingDatasetv2(Dataset):
         if self.segmentation_strategy!='onset':
             mix_chunks = np.mean([[chunks for chunks in self.containers[i][chunk_idx][0]] for i in other_idx],axis=0) #combine chunks : (N,samples)
         
+
         else :
             #if onset segmentation need to redo segmentation on whole mix... : find way to do this only once !!!!
-            #not best solution but could do the getitem method, concat each track chunks, sum and the resegment... otherwise needs to modify postchunk to return unchunked tracks and chunk them here and has no sense if class used elsewhere...
+            #not best solution but could do the getitem method, concat each track chunks, sum and the resegment... 
+            # otherwise needs to modify postchunk to return unchunked tracks and chunk them here and has no sense if class used elsewhere...
             paths, starts, ends = zip(*[self.containers[i].track_chunks[chunk_idx][:3] for i in other_idx])
             start, end = starts[0], ends[0]
             duration = end-start
@@ -890,7 +837,7 @@ class MusicCouplingDatasetv2(Dataset):
         return input_chunks, target_chunks
       
     #CAREFUL THIS METHOD ONLY WORKS FOR PAIRING TRACKS OF SAME NAME !!!!
-    #when using going further in implementation find algorithm for correctly sorting conatiners by pair of tracks and then do mix-match augmentastion
+    #when going further in implementation find algorithm for correctly sorting conatiners by pair of tracks and then do mix-match augmentastion
     def sort_containers(self):
         for i in range(len(self.containers)):
             self.containers[i].track_chunks = sorted(self.containers[i].track_chunks, key = lambda x : (os.path.basename(x[0]),x[1]))   #sort by name then by start time
@@ -1018,13 +965,16 @@ class MusicDataCollator:
         normalized_chunks = []
         
         for chunks in batched_chunks:
-            normalized_chunks.append([(chunk-np.mean(chunk))/(np.std(chunk)+1e-9) for chunk in chunks])
+            chunks_cat = np.concatenate(chunks) #needed for inhomogenous chunks (i.e. onset segmentation)
+            mean = np.mean(chunks_cat)
+            std = np.std(chunks_cat)
+            normalized_chunks.append([(chunk-mean)/(std+1e-9) for chunk in chunks])
         
         #normalized_chunks = tuple(normalized_chunks)
         
         return normalized_chunks   
     
-    #TODO : THIS METHOD CAN BE UNIFIED FOR UNIFORM ANF INHOMOGENOUS CHUNKS !!!
+    #TODO : THIS METHOD CAN BE UNIFIED FOR UNIFORM AND INHOMOGENOUS CHUNKS !!!
     def _pad_chunks(self, batched_chunks : tuple):
         #this method applies a padding to the 1st dimension of the chunks with respect of the max number of chunks in the batch
         #new : also applies apdding to samples dimension and saves the mask
@@ -1036,7 +986,7 @@ class MusicDataCollator:
         if self.unifrom_chunks:
             
             #samples dim paddign mask is all false when uniform chunking (obvious, could also give None)
-            samples_padding_mask = np.zeros_like(batched_chunks)
+            samples_padding_mask = np.zeros_like(batched_chunks) #(B, max_chunks, max_samples)
             
             batched_chunks = np.array(batched_chunks)
             L = batched_chunks[0].shape[1] #assuming all chunks have the same number of samples
@@ -1115,7 +1065,7 @@ class MusicDataCollator:
         return padded_chunks, samples_padding_mask, chunks_padding_mask
     
     
-    def __call__(self,batch):
+    def __call__(self,batch) -> Munch[torch.Tensor,torch.Tensor,Tuple[torch.Tensor,torch.Tensor],torch.Tensor]:
         
         slices=[] # for compatibility
         if self.with_slices:
@@ -1156,7 +1106,7 @@ class MusicDataCollator:
 @dataclass
 class DataCollatorForCoupling(MusicDataCollator):
     
-    def __call__(self, batch):
+    def __call__(self, batch) -> Munch[torch.Tensor,torch.Tensor,Tuple[torch.Tensor,torch.Tensor],Tuple[torch.Tensor,torch.Tensor],torch.Tensor]:
         input_chunks, target_chunks = zip(*batch)
         
         #input and target chunks are lists of len = batch size and eahc element is of shape N,max_samples but N may vary

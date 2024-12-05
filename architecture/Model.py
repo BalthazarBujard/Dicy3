@@ -85,8 +85,8 @@ def build_quantizer(dim, vocab_size, learnable_codebook):
     return vq
     
 
-def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None):
-    encoder = LocalEncoder(backbone,quantizer,head_module,embed_dim=backbone.dim,condense_type=condense_type)
+def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None, chunking:str='pre'):
+    encoder = LocalEncoder(backbone,quantizer,head_module,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
     return encoder
 
 #create class for decision module to handle forward call in seq2seq

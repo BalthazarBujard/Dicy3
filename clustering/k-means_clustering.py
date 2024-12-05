@@ -31,17 +31,18 @@ def generate_codebook(codebook_sizes):
     #%%
 
     #load data
-    folders = ["BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A1",
-            "BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A2",
-            "BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A1",
-            "BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A2",
-            "BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A3",
-            "Examples",
-            "moisesdb_v2/train",
-            "MusicNet"] 
+    folders = [
+        "BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A1",
+        "BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A2",
+        "BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A1",
+        "BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A2",
+        "BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A3",
+        "moisesdb_v2/train"
+        ] 
 
     roots = [f"../data/{root}" for root in folders]
 
+    #TODO : CHANGE seg start to sliding
     max_duration=1.
     sr=16000
     segmentation_strategy="uniform" #normally this doesnt affect the kmeans centers since we use the codes from the finest resolution (output of w2v)
@@ -53,7 +54,10 @@ def generate_codebook(codebook_sizes):
     # dataloader
     batch_size=64
     feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
+    
+    #TODO : CHANGE COLLATOR TO OUR MUSICDATACOLLATOR
     collate_fn=DataCollatorForWav2Vec2(model.backbone,feature_extractor,split="test")
+    
     loader = DataLoader(ds,batch_size,shuffle=True,collate_fn=collate_fn)
     fetcher=Fetcher(loader)
     fetcher.device=DEVICE
@@ -123,11 +127,11 @@ if __name__=="__main__":
     DEVICE = lock_gpu()[0]
     
     codebook_sizes = [2**n for n in range(4,11)]
-    generate_codebook([512,1024])
-    """ 
+    #generate_codebook([512,1024])
+
     for codebook_size in codebook_sizes:
         prGreen(f"Generating kmeans VQ with {codebook_size} centers")
         generate_codebook(codebook_size)
-    """
+
     
 
