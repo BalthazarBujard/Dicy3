@@ -62,7 +62,7 @@ def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_non
     
     return model, model_params
 
-def build_backbone(checkpoint, type, mean, pooling, fw="fairseq"):
+def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairseq"):
     #load pretrained backbone
     if fw=="fairseq":
         models, _, _ = load_model_ensemble_and_task([checkpoint])
@@ -71,7 +71,7 @@ def build_backbone(checkpoint, type, mean, pooling, fw="fairseq"):
     else :
         NotImplementedError("Not implemented builder for other framework than fairseq")
     
-    backbone = Backbone(pretrained_backbone,type,mean,pooling)
+    backbone = Backbone(pretrained_backbone,type,mean,pooling,output_final_proj)
     
     return backbone
 
@@ -95,7 +95,7 @@ def build_decision(dim, layers, vocab_size , inner_dim=2048, heads=8, dropout=0.
     return decisionModule
     
 
-
+#TODO : ADD output_final_proj ARG
 def SimpleSeq2SeqModel(backbone_checkpoint,
                        backbone_type, 
                        dim,

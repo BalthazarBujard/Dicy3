@@ -1,10 +1,14 @@
 #script to compute clusters from latent vectors
 
 #%%
-from architecture.Model import build_backbone
 from utils.utils import lock_gpu,prYellow,prGreen
+
+prYellow(f"Locking GPU...")
+DEVICE = lock_gpu()[0][0]
+
+from architecture.Model import build_backbone
 from wav2vec2.wav2vec2_utils import DataCollatorForWav2Vec2 # type: ignore
-from MusicDataset.MusicDataset_v2 import MusicContainer,Fetcher
+from MusicDataset.MusicDataset_v2 import MusicContainer,Fetcher,MusicDataCollator
 from sklearn.cluster import MiniBatchKMeans
 #from torch_kmeans import KMeans
 from torch.utils.data import DataLoader
@@ -12,18 +16,21 @@ from transformers import Wav2Vec2FeatureExtractor
 from tqdm import tqdm
 import numpy as np
 import torch
+from typing import List
 
 #%%
-def generate_codebook(codebook_sizes):
+def generate_codebook(codebook_sizes : List[int], dim : int):
     
     #codebook_size=16
 
+    assert dim in [256,768], "the dimension for the codebook should be either 768 (for hidden state output) or 256 (final projection layer output)"
+    output_final_proj = dim==256
 
     #%%
     #model
     prYellow("Loading model from checkpoint...")
     checkpoint="../w2v_music_checkpoint.pt"
-    model = build_backbone(checkpoint,type="w2v",mean=False,pooling=False)
+    model = build_backbone(checkpoint,type="w2v",mean=False,pooling=False,output_final_proj=output_final_proj)
     model.to(DEVICE)
     model.freeze()
     model.eval()
@@ -40,12 +47,11 @@ def generate_codebook(codebook_sizes):
         "moisesdb_v2/train"
         ] 
 
-    roots = [f"../data/{root}" for root in folders]
+    roots = [f"/data3/anasynth_nonbp/bujard/data/{root}" for root in folders]
 
-    #TODO : CHANGE seg start to sliding
-    max_duration=1.
+    max_duration=10 #the longer the sequence the better
     sr=16000
-    segmentation_strategy="uniform" #normally this doesnt affect the kmeans centers since we use the codes from the finest resolution (output of w2v)
+    segmentation_strategy="sliding" #normally this doesnt affect the kmeans centers since we use the codes from the finest resolution (output of w2v)
 
     s="\n ".join(folders)
     prYellow(f"Creating dataset from folders :\n {s}")
@@ -53,10 +59,9 @@ def generate_codebook(codebook_sizes):
     # %%
     # dataloader
     batch_size=64
-    feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
     
     #TODO : CHANGE COLLATOR TO OUR MUSICDATACOLLATOR
-    collate_fn=DataCollatorForWav2Vec2(model.backbone,feature_extractor,split="test")
+    collate_fn=MusicDataCollator(unifrom_chunks=segmentation_strategy!='onset') #DataCollatorForWav2Vec2(model.backbone,feature_extractor,split="test")
     
     loader = DataLoader(ds,batch_size,shuffle=True,collate_fn=collate_fn)
     fetcher=Fetcher(loader)
@@ -121,17 +126,15 @@ def generate_codebook(codebook_sizes):
 # %%
 
 
-if __name__=="__main__":
-    #device lock
-    prYellow(f"Locking GPU...")
-    DEVICE = lock_gpu()[0]
+if __name__=="__main__":   
     
     codebook_sizes = [2**n for n in range(4,11)]
+    dim=768
     #generate_codebook([512,1024])
 
     for codebook_size in codebook_sizes:
-        prGreen(f"Generating kmeans VQ with {codebook_size} centers")
-        generate_codebook(codebook_size)
+        prGreen(f"Generating kmeans VQ with {codebook_size} centers of dim {dim}")
+        generate_codebook(codebook_size, dim)
 
     
 

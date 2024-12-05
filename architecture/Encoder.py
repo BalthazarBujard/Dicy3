@@ -16,7 +16,7 @@ class Backbone(nn.Module):
     General class for pretrained backbones
     
     """
-    def __init__(self, pretrained_model:nn.Module, type:str, mean=False, pooling=False):
+    def __init__(self, pretrained_model:nn.Module, type:str, mean=False, pooling=False, output_final_proj = False):
         super().__init__()
         self.backbone = pretrained_model
         self.type = type
@@ -24,15 +24,22 @@ class Backbone(nn.Module):
         if pooling : 
             assert mean==False, "If pooling, no average should be done."
         self.pooling=pooling #if backbone should condense infor with pooling. used as an intermediate feature for latent space analysis, normaly done in loacalEncoder
-
+        self.output_final_proj = output_final_proj #flag to use either hidden layer output or final projection output
+        
     @property
     def dim(self):
         if isinstance(self.backbone, transformers.PreTrainedModel):
             #seems like all hf pretrainedmodels share the same config file structure 
-            embed_dim=self.backbone.config.hidden_size
+            if self.output_final_proj:
+                embed_dim = self.backbone.config.classifier_proj_size
+            
+            else : embed_dim=self.backbone.config.hidden_size
         
         elif isinstance(self.backbone, fairseq.models.wav2vec.wav2vec2.Wav2Vec2Model):
-            embed_dim= self.backbone.cfg["encoder_embed_dim"]
+            if self.output_final_proj :
+                embed_dim = self.backbone.cfg["final_dim"]
+            
+            else : embed_dim= self.backbone.cfg["encoder_embed_dim"]
         
         else :
             raise NotImplementedError("No implementation for other than fairseq Wav2Vec2Model and HuggingFace PreTrainedModel(s)")
@@ -78,18 +85,26 @@ class Backbone(nn.Module):
                     raise RuntimeError("Not sure if padding mask should be given to HF model...")
                 
                 #on dirait que le wav2vec de HF ne fait pas directement dans le forward le maskage des timesteps donc pas besoin de modifier.
-                outputs = self.backbone(x, output_hidden_states=True)
-                z = outputs.hidden_states[-1]
-                #TODO: POUR PASSER DE 768 A 256 UTILISER outputs.projected_states et 
-                # peut etre pas besoin de output_hidden_states=True
+                if self.output_final_proj :
+                    outputs = self.backbone(x, attention_mask = padding_mask, output_hidden_states=False)
+                    z = outputs.projected_states 
+                
+                else :
+                    outputs = self.backbone(x, attention_mask = padding_mask, output_hidden_states=True)
+                    z = outputs.hidden_states[-1]
+                
             
             elif isinstance(self.backbone, fairseq.models.wav2vec.wav2vec2.Wav2Vec2Model):
                 #TODO : POUR PASSER DE 768 A 256 UTILISER outputs['projected_states'] et enlever features_only=True
                 #z = outputs['projected_states']
+                if self.output_final_proj:
+                    outputs = self.backbone(x, features_only=False, padding_mask=padding_mask, mask=False)
+                    z=outputs['projected_states']
                 
-                #arg 'mask' determines wether to mask timesteps so if we are not in training we do not want to mask inputs
-                outputs = self.backbone(x, features_only=True, padding_mask=padding_mask, mask=False) 
-                z = outputs['x']
+                else :
+                    #arg 'mask' determines wether to mask timesteps so if we are not in training we do not want to mask inputs
+                    outputs = self.backbone(x, features_only=True, padding_mask=padding_mask, mask=False) 
+                    z = outputs['x']
             
             else :
                 str="The wav2vec pretrained backbone of type" + str(type(self.backbone)) + "is not supported.\
@@ -196,7 +211,7 @@ class LocalEncoder(nn.Module):
         self.condense_type = condense_type
         
         if head_module=="attention":
-            if condense_type==None : raise ValueError("collapse module is attention, a condense type has to be specified")
+            if condense_type==None : raise ValueError("collapse module is attention, a condense type has to be specified : 'mask' or 'weighed'")
             
             if embed_dim != self.encoder.dim:
                 prRed("For now this class doesnt accept embed_dim different than the one given by backbone.\
