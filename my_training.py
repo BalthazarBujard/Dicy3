@@ -21,24 +21,27 @@ def main():
     parser.add_argument('-td','--track_duration', type = float, default=30.)
     parser.add_argument('-seg',"--segmentation", type=str, default="uniform")
     parser.add_argument('-p_seg',"--pre_segmentation", type=str, default="sliding")
+    parser.add_argument('--pre_post_chunking',type = str, choices=['pre','post'])
     parser.add_argument('-dir','--direction',type=str,choices=["stem","mix"],default="stem")
+    parser.add_argument('-dim', type = int, choices=[256,768])
     parser.add_argument('--ignore',type=list,nargs='+',default=["drums", "percussions", "other"])
     parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],required=True)
     parser.add_argument('--learnable_cb',action='store_true')
+    parser.add_argument('-restart','--restart_codebook', action='store_true')
     parser.add_argument('--codebook_loss_weight',type=float,default=1.)
     parser.add_argument('-head','--encoder_head',type=str,choices=['mean','attention'],required=True)
     parser.add_argument('-condense','--condense_type',type=str,choices=['mask','weighed'],default=None)
     parser.add_argument('-layers','--transformer_layers',type=int,default=8)
-    parser.add_argument('-decoder','--decoder_only',action='store_true')
+    #parser.add_argument('-decoder','--decoder_only',action='store_true')
     parser.add_argument('--inner_dim',type=int,default=2048)
     parser.add_argument('--heads',type=int,default=12)
-    parser.add_argument('--dropout',type=float,default=0.5)
+    parser.add_argument('--dropout',type=float,default=0.1)
     parser.add_argument('--task',type=str,choices=['completion','coupling'],default='coupling')
     parser.add_argument('-lr','--learning_rate',type=float,default=1e-4)
     parser.add_argument('-epochs',type=int,default=20)
     parser.add_argument('-batch_size',type=int,default=8)
-    parser.add_argument('-decay','--weight_decay',type=float,default=5e-2)
-    parser.add_argument('-reg_alpha',type=float,default=0.2)
+    parser.add_argument('-decay','--weight_decay',type=float,default=1e-5)
+    parser.add_argument('-reg_alpha',type=float,default=0.)
     parser.add_argument('-grad_accum',type=int,default=1)
     parser.add_argument('-k',type=int,default=5)
     parser.add_argument("--run_id",required=True)
@@ -116,16 +119,20 @@ def main():
     #%%
 
     #model building
-
+    dim = args.dim #model dimension : 256 or 768
+    
     #BACKBONE
     pretrained_bb_checkpoint = "../w2v_music_checkpoint.pt"
     bb_type="w2v"
+    #output_final_proj = dim==256 done inside model builder
+    pre_post_chunking = args.pre_post_chunking
 
     #VQ
-    dim=768  #quantizer output dimension. if different than backbone dim must be learnable codebook (becomes an nn.Embedding layer to be learned)
+    #dim=768  #quantizer output dimension. if different than backbone dim must be learnable codebook (becomes an nn.Embedding layer to be learned)
     learnable_codebook=args.learnable_cb #if the codebooks should get closer to the unquantized inputs
     codebook_loss_weight = args.codebook_loss_weight
     if learnable_codebook : assert codebook_loss_weight>0
+    restart_codebook = args.restart_codebook
 
     #POS ENCODING
     div_term = MAX_CHUNK_DURATION if SEGMENTATION_STRATEGY in ['uniform','sliding'] else MIN_RESOLUTION
@@ -147,7 +154,7 @@ def main():
 
     #DECISION
     transformer_layers = args.transformer_layers
-    decoder_only=args.decoder_only 
+    decoder_only=True #args.decoder_only always decod4er only (backbone is the encoder)
     inner_dim=args.inner_dim
     heads=args.heads
     dropout = args.dropout
@@ -158,11 +165,13 @@ def main():
                             vocab_size,
                             max_len,
                             encoder_head,
+                            chunking=pre_post_chunking,
                             use_special_tokens=use_special_tokens,
                             task=task,
                             condense_type=condense_type,
                             freeze_backbone=True,
                             learnable_codebook=learnable_codebook,
+                            restart_codebook=restart_codebook,
                             transformer_layers=transformer_layers,
                             dropout=dropout,
                             decoder_only=decoder_only,
@@ -212,7 +221,8 @@ def main():
     eval=val_fetcher!=None
     epochs = args.epochs
 
-    prGreen(f"Training with \n len {MAX_TRACK_DURATION}s, \n resolution {MAX_CHUNK_DURATION}s, \n direction {dir}, \n vocab {vocab_size}")
+    #TODO : add dimension to print, pre-post-chunkinbg,...
+    prGreen(f"Training with \n len {MAX_TRACK_DURATION}s, \n resolution {MAX_CHUNK_DURATION}s, \n direction {dir},\n dim {dim}, \n vocab {vocab_size}\n {pre_post_chunking}-chunking")
 
     reg_alpha=args.reg_alpha
     trainer.train(train_fetcher,val_fetcher,epochs,eval,reg_alpha=reg_alpha) 

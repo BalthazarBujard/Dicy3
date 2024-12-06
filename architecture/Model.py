@@ -76,12 +76,12 @@ def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairs
     
     return backbone
 
-def build_quantizer(dim, vocab_size, learnable_codebook)-> KmeansQuantizer:
+def build_quantizer(dim, vocab_size, learnable_codebook, restart)-> KmeansQuantizer:
     #vector quantizer  
     assert vocab_size in [16,32,64,128,256,512,1024]
     centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{dim}.npy",allow_pickle=True)
     centers=torch.from_numpy(centers)
-    vq = KmeansQuantizer(centers,learnable_codebook,dim)
+    vq = KmeansQuantizer(centers,learnable_codebook,dim,restart)
     
     return vq
     
@@ -105,6 +105,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
                        encoder_head,
                        use_special_tokens,
                        task,
+                       chunking,
                        restart_codebook=False,
                        condense_type=None,
                        has_masking=False,
@@ -143,7 +144,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
        
     
     #vector quantizer  
-    vq = build_quantizer(dim, vocab_size, learnable_codebook)
+    vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook)
     
     """
     ema_update =  not learnable_codebook
@@ -167,8 +168,8 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
                          kmeans_init=kmeans_init,
                          threshold_ema_dead_code=threshold_ema_dead_code)
     """
-    
-    localEncoder=build_localEncoder(backbone, vq, encoder_head, condense_type)
+    assert chunking in ['pre','post']
+    localEncoder=build_localEncoder(backbone, vq, encoder_head, condense_type,chunking)
         
     decision_module = build_decision(localEncoder.dim,transformer_layers,
                                      vocab_size=vocab_size+3*use_special_tokens, #+ pad, sos, eos

@@ -218,7 +218,9 @@ class Seq2SeqTrainer(nn.Module):
         #totasl loss = crossentropy + codebook loss + (-entropy)
         loss = (loss_ce + loss_commit - loss_entropy)/self.grad_accum_steps 
         
-        preds = predict_topK(self.k,logits,tgt_out) #TODO : MODIFIER POUR DECODER BEAM SEARCH
+        #TODO : MODIFIER POUR DECODER BEAM SEARCH 
+        # -> ca n'a pas de sens car beam search c'est pour du decodage, ici les probas pour tous les steps sont deja calculees (a partir du teacher forcing)
+        preds = predict_topK(self.k,logits,tgt_out) 
         
         acc = compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=self.model.special_tokens_idx["pad"])
         
