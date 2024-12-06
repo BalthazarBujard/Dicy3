@@ -8,6 +8,7 @@ from fairseq.checkpoint_utils import load_model_ensemble_and_task
 import torch.nn as nn
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
+from typing import Tuple
 
 #wrapper class to get eattributes without changing whole code
 class myDDP(DDP):
@@ -20,7 +21,7 @@ class myDDP(DDP):
 #script to build different models and load checkpopints
 
 #TODO : NOW THE SEQ2SEQ BUILDER CAN TAKE **KWARGS FROM DICT
-def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Seq2SeqBase :
+def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Tuple[Seq2SeqBase, dict] :
     
     ckp = torch.load(ckp_path, map_location=torch.device("cpu"))
     model_class = ckp["model_class"]
@@ -62,7 +63,7 @@ def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_non
     
     return model, model_params
 
-def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairseq"):
+def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairseq") -> Backbone:
     #load pretrained backbone
     if fw=="fairseq":
         models, _, _ = load_model_ensemble_and_task([checkpoint])
@@ -75,27 +76,27 @@ def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairs
     
     return backbone
 
-def build_quantizer(dim, vocab_size, learnable_codebook):
+def build_quantizer(dim, vocab_size, learnable_codebook)-> KmeansQuantizer:
     #vector quantizer  
     assert vocab_size in [16,32,64,128,256,512,1024]
-    centers=np.load(f"/data3/anasynth_nonbp/bujard/DICY2/clustering/kmeans_centers_{vocab_size}.npy",allow_pickle=True)
+    centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{dim}.npy",allow_pickle=True)
     centers=torch.from_numpy(centers)
     vq = KmeansQuantizer(centers,learnable_codebook,dim)
     
     return vq
     
 
-def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None, chunking:str='pre'):
+def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None, chunking:str='pre') -> LocalEncoder:
     encoder = LocalEncoder(backbone,quantizer,head_module,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
     return encoder
 
 #create class for decision module to handle forward call in seq2seq
-def build_decision(dim, layers, vocab_size , inner_dim=2048, heads=8, dropout=0.1, decoder_only=False, norm_first=True):
+def build_decision(dim, layers, vocab_size , inner_dim=2048, heads=8, dropout=0.1, decoder_only=False, norm_first=True) -> Decision:
     decisionModule = Decision(dim, layers, vocab_size, inner_dim, heads, dropout, decoder_only, norm_first)
     return decisionModule
     
 
-#TODO : ADD output_final_proj ARG
+
 def SimpleSeq2SeqModel(backbone_checkpoint,
                        backbone_type, 
                        dim,
@@ -109,11 +110,11 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
                        has_masking=False,
                        freeze_backbone=True,
                        learnable_codebook=False,
-                       transformer_layers=6,
+                       transformer_layers=8,
                        dropout=0.1,
                        decoder_only=False,
                        inner_dim=2048,
-                       heads=8,
+                       heads=12,
                        norm_first=True,
                        kmeans_init=False,
                        threshold_ema_dead_code=0,
@@ -122,8 +123,13 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
     
     assert task.lower() in ["coupling","completion"]
     
+    output_final_proj = dim==256 #if model dimension is 256 we want the final projection output, else 768 hidden layer output dim
+    
     #load pretrained backbone
-    backbone=build_backbone(backbone_checkpoint,backbone_type,mean=False,pooling=False,fw="fairseq") #no mean or pooling for backbone in seq2seq, collapse done in encoder
+    backbone=build_backbone(backbone_checkpoint,backbone_type,
+                            mean=False,pooling=False, 
+                            output_final_proj=output_final_proj,
+                            fw="fairseq") #no mean or pooling for backbone in seq2seq, collapse done in encoder
     
     if freeze_backbone:
         backbone.eval() # SI ON UNFREEZE BB IL FAUT TRAIN VQ
@@ -132,16 +138,12 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
     elif learnable_codebook == False:
         raise ValueError("Train VQ if backbone in learning.")
     
-    else : #trainable bb and codebook
+    else : #trainable bb and codebook _> only freeze feature extractor (CNN)
         backbone.freeze_feature_extractor()
        
     
     #vector quantizer  
-    assert vocab_size in [16,32,64,128,256,512,1024]
-    centers=np.load(f"/data3/anasynth_nonbp/bujard/DICY2/clustering/kmeans_centers_{vocab_size}.npy",allow_pickle=True)
-    centers=torch.from_numpy(centers)
-    vq = KmeansQuantizer(centers,learnable_codebook,dim,restart=restart_codebook)
-    #vq.eval()
+    vq = build_quantizer(dim, vocab_size, learnable_codebook)
     
     """
     ema_update =  not learnable_codebook
@@ -167,7 +169,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
     """
     
     localEncoder=build_localEncoder(backbone, vq, encoder_head, condense_type)
-    
+        
     decision_module = build_decision(localEncoder.dim,transformer_layers,
                                      vocab_size=vocab_size+3*use_special_tokens, #+ pad, sos, eos
                                      inner_dim=inner_dim,

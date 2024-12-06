@@ -434,8 +434,6 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         out = self.decision(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) #already logits over vocab_size
         
-        #out = self.output_layer(out) #predicted tokens as logits for each timestep
-        
         return out, tgt, tgt_idx, codebook_loss #return predictions and encoded target sequence for loss computing
     
     #TODO : MOVE ENCODE TO BASE CLASS

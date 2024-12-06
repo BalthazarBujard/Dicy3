@@ -15,7 +15,7 @@ class KmeansQuantizer(nn.Module):
         if isinstance(centers,np.ndarray) : centers = torch.from_numpy(centers)
         
         self.codebook_size=len(centers)
-        self.centers=centers #DONT KNOW IF GOOD IDEA TO DO THIS ? COULD LEAD TO GRADIENT PROBLEM
+        self.centers=centers #DONT KNOW IF GOOD IDEA TO DO THIS ? COULD LEAD TO GRADIENT PROBLEM ?
         
         if dim==centers.size(-1):
             self.codebook=nn.Parameter(centers,requires_grad=learnable_codebook) #(vocab_size,dim)
