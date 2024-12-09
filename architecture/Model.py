@@ -139,7 +139,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
     elif learnable_codebook == False:
         raise ValueError("Train VQ if backbone in learning.")
     
-    else : #trainable bb and codebook _> only freeze feature extractor (CNN)
+    else : #trainable bb and codebook -> only freeze feature extractor (CNN)
         backbone.freeze_feature_extractor()
        
     

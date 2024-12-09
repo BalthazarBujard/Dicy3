@@ -20,15 +20,18 @@ IGNORE = ["drums", "percussion", "other"]
 
 
 def build_model(args):
-        
+    
+    #BACKBONE
     pretrained_bb_checkpoint = "../w2v_music_checkpoint.pt"
     bb_type="w2v"
+    dim=args.dim
+    pre_post_chunking = args.pre_post_chunking
     freeze_backbone=args.freeze_backbone 
 
     vocab_size = args.vocab_size
 
     #VQ
-    dim=768  #quantizer output dimension. if different than backbone dim must be learnable codebook (becomes an nn.Embedding layer to be learned)
+    #dim=768  #quantizer output dimension. if different than backbone dim must be learnable codebook (becomes an nn.Embedding layer to be learned)
     learnable_codebook=args.learnable_cb#args.learnable_cb #if the codebooks should get closer to the unquantized inputs
     restart_codebook=args.restart_codebook #update dead codevectors
     if restart_codebook and not learnable_codebook: prRed("restart codebook without learnable codebook") 
@@ -51,7 +54,7 @@ def build_model(args):
 
     #DECISION
     transformer_layers = args.transformer_layers
-    decoder_only=args.decoder_only 
+    decoder_only=True #args.decoder_only 
     inner_dim=args.inner_dim
     heads=args.heads
     dropout = args.dropout
@@ -62,6 +65,7 @@ def build_model(args):
                                     vocab_size,
                                     max_len,
                                     encoder_head,
+                                    chunking=pre_post_chunking,
                                     use_special_tokens=use_special_tokens,
                                     task=task,
                                     condense_type=condense_type,
@@ -128,8 +132,8 @@ def build_ds(args):
     
     return train_roots,val_roots
 
-
-def setup(rank, world_size,mastr_port=12355):
+# WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
+def setup(rank, world_size,mastr_port=12356):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'
 

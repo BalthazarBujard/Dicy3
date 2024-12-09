@@ -44,6 +44,7 @@ def main():
     parser.add_argument('-reg_alpha',type=float,default=0.)
     parser.add_argument('-grad_accum',type=int,default=1)
     parser.add_argument('-k',type=int,default=5)
+    parser.add_argument('-data',type = str, choices=['canonne','moises','all'])
     parser.add_argument("--run_id",required=True)
 
     args=parser.parse_args()
@@ -83,7 +84,12 @@ def main():
 
     moisesdb_train = "../data/moisesdb_v2/train"
     moises_tracks = extract_all_groups(moisesdb_train,IGNORE)
-    train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
+    if args.data == 'all':
+        train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
+    elif args.data == 'canonne':
+        train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]
+    else :
+        train_roots=moises_tracks
 
     D_A1="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/val/A1"
     D_A2="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/val/A2"
@@ -94,7 +100,12 @@ def main():
     moisesdb_val = "../data/moisesdb_v2/val"
     moises_tracks = extract_all_groups(moisesdb_val,IGNORE)
 
-    val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
+    if args.data == 'all':
+        val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
+    elif args.data == 'canonne':
+        val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]
+    else :
+        val_roots=moises_tracks
 
     #track_folder = "../data/moisesdb_v0.1/737356b2-ce9c-448b-877b-e42b3ed94563"
     #roots = generate_couples(track_folder)
