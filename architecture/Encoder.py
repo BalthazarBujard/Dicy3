@@ -78,7 +78,7 @@ class Backbone(nn.Module):
     
     #TODO: DANS LA DOCUMENTATION DE HUGGING FACE ILS DISENT QUE LE WAV2VEC BASE A DES MEILEURS RESULTATS
     # SI EN INFERENCE ON DONNE PAS DE PAD MASK
-    def forward(self, x, padding_mask=None):
+    def forward(self, x : torch.Tensor, padding_mask : torch.Tensor = None):
         if self.type=="w2v":
             if isinstance(self.backbone, transformers.Wav2Vec2ForPreTraining):
                 if padding_mask!=None :
@@ -121,7 +121,7 @@ class Backbone(nn.Module):
             z = z[...,0] #remove time dimension
 
         #(B,D) if mean or pooling, else (B,L,D)
-        
+        print(x.shape,z.shape)
         return z
 
 #TODO : DOUBLE CHECK IF THIS IMPLEMENTATION IS CORRECT ESPECIALLY THE CREATE_MASK METHOD                
@@ -190,8 +190,6 @@ class TransformerEncoderBloc(nn.Module):
         
 
 
-# Maybe embed dim is too big and should rather project to lower dim space like 256 (as projected_outputs of w2v)
-# use the quantizer dim to project to lower dimension
 class LocalEncoder(nn.Module):
     def __init__(self, pretrained_encoder : Backbone, quantizer : nn.Module,
                  head_module : str = "mean", condense_type=None, embed_dim : int = 768, 
@@ -279,7 +277,7 @@ class LocalEncoder(nn.Module):
         return padding_mask
     
     def forward(self, x : torch.Tensor,
-                sample_codebook_temp : float = None,
+                sample_codebook_temp : float = None, #not used at thge moment
                 padding_mask : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:        
         # x is expected to have shape B,chunks,samples
         if x.ndim!=3:
@@ -298,19 +296,20 @@ class LocalEncoder(nn.Module):
         
         
         else : #post-chunking
-            x = x.contiguous().view(B,-1) #first reshape as B, chunks*max_samples for backbone compatibility
+            x = x.contiguous().view(B,-1) #first reshape as B, chunks*max_samples = track_duration for backbone compatibility
             padding_mask = padding_mask.contiguous().view(B,-1) if padding_mask!=None else None
             
-            x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B,L,D) L<<max_samples*chunks
+            x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B,L,D) L<<track_duration
             
-            #reshape and process mask more complicated for post-chunkingf
-            T = torch.ceil(torch.tensor(x.size(1)/chunks)).int()
+            #reshape and process mask more complicated for post-chunking
+            #we want to preserve the number of chunks --> pad to reshape as (B,chunks,-1,D)
+            T = torch.ceil(torch.tensor(x.size(1)/chunks)).int() #duration of a chunk to have 'chunks'
             #the total duration of the sequence
             new_L = chunks*T
             #pad length to have new_L
             pad = new_L-x.size(1)
             x = torch.cat([x,torch.zeros((x.size(0),pad,x.size(-1)),device=x.device)],dim=1)
-            #reshape as B*chunks, T, D
+            #reshape as B*chunks, L', D
             x=x.view(B*chunks,-1,x.size(-1))
 
 
@@ -318,12 +317,12 @@ class LocalEncoder(nn.Module):
             padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
             #process mask with x without the padding -> avoid appending True to mask where it shouldnt
             #and len of x[:,:-pad] is equivalent to the output length of max_samples
-            padding_mask = self._process_padding_mask(x[:,:-pad], padding_mask) #(B*chunks,L')
-            padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L') for easier append of pad mask
+            padding_mask = self._process_padding_mask(x[:,:-pad], padding_mask) #(B*chunks,L-pad)
+            padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L-pad) for easier append of pad mask
             pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
             pad_step_mask[:,-1]=True #the last 'pad' steps of the last chunk are padded
-            padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,T)
-            padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, T            
+            padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,L')
+            padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, L'            
 
         
         
@@ -335,7 +334,6 @@ class LocalEncoder(nn.Module):
         x = x.view(B,chunks,-1) 
         
         #vector quantizer
-        #x = self.out_proj(x) #project to quantizer dimension
         xq, indices, codebook_loss = self.quantizer(x, sample_codebook_temp=sample_codebook_temp)
         
         return xq, indices, codebook_loss #indices are needed for cressentropy loss in seq2seq model training

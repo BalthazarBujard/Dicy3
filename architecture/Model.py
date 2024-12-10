@@ -48,10 +48,15 @@ def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_non
     except :
         dropout = 0.1 #default value for older models
     
+    try :
+        chunking = model_params['pre_post_chunking']
+    except :
+        chunking = 'pre' #old models have pre chunking
+    
     task = model_params["task"]
     
     #if issubclass(model_class,Seq2SeqBase):
-    model = SimpleSeq2SeqModel(backbone_checkpoint,bb_type,dim,vocab_size,max_len,encoder_head,use_special_tokens,
+    model = SimpleSeq2SeqModel(backbone_checkpoint,bb_type,dim,vocab_size,max_len,encoder_head,use_special_tokens,chunking=chunking,
                                    condense_type=condense_type,has_masking=has_masking,task=task,transformer_layers=transformer_layers,decoder_only=decoder_only,inner_dim=inner_dim,heads=heads,dropout=dropout)
     
     #else : raise ValueError(f"the model class from the checkpoint is invalid. Should be an instance (or subclass) of 'Seq2SeqBase' but got {model_class}")

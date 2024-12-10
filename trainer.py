@@ -84,6 +84,7 @@ class Seq2SeqTrainer(nn.Module):
         
         model_params = {"backbone_type":self.model.encoder.encoder.type,
                         "dim":model.dim,
+                        "pre_post_chunking":model.encoder.chunking_pre_post_encoding,
                         "vocab_size":self.model.codebook_size,
                         "learnable_codebook" : self.model.encoder.quantizer.learnable_codebook,
                         "chunk_size" : self.chunk_size,
