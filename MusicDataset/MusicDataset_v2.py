@@ -510,7 +510,7 @@ class MusicContainerPostChunk(MusicContainer):
     def segment_track_uniform(self,track,return_slices=False):
         max_samples = int(self.max_duration*self.sampling_rate) #max samples per chunkn. CAREFUL IF MAX*SR IS NOT AN INT !!!!!
         r = len(track)%max_samples #remaining samples
-        pad_len = int(max_samples-r) #padding length to have equal sized chunks
+        pad_len = int(max_samples-r) if r>0 else 0 #padding length to have equal sized chunks
         pad = np.zeros(pad_len)
         track_padded = np.concatenate([track,pad])
         chunks = track_padded.reshape(-1,max_samples)
