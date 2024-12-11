@@ -81,7 +81,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
 
     prospector = FactorOracleProspector(corpus, label_type, max_continuity=max_continuity)
     generator = Dicy2Generator(prospector, force_output=force_output)
-    
+    print("Corpus (= GT):\n",[label for label,_ in corpus_data])
     return memory_chunks, generator
 
 def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
