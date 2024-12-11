@@ -11,8 +11,8 @@ import argparse
 from librosa import load
 
 
-def generate_examples(model_ckp,with_coupling,remove,k, decoding_type,fade_time,num_examples,data,save_dir):
-    model, params = load_model_checkpoint(model_ckp)
+def generate_examples(model_ckp,with_coupling,remove,k, decoding_type,fade_time,num_examples,data,save_dir, from_subset=False):
+    model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
     _=model.to(DEVICE) 
@@ -26,10 +26,12 @@ def generate_examples(model_ckp,with_coupling,remove,k, decoding_type,fade_time,
         k=int(k*params['vocab_size'])
     else : k=int(k)
     
+    val_folder = "val_subset" if from_subset else "val"
+    
     if 'canonne' in data:
         #clement cannone
-        canonne_t = "../data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/val"
-        canonne_d = "../data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/val"
+        canonne_t = f"../data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_folder}"
+        canonne_d = f"../data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{val_folder}"
         
         canonne = [canonne_t,canonne_d]
         if data=='canonne':
@@ -76,7 +78,7 @@ def generate_examples(model_ckp,with_coupling,remove,k, decoding_type,fade_time,
         
 
     elif data == 'moises':
-        root="../data/moisesdb_v2/val"
+        root= f"../data/moisesdb_v2/{val_folder}"
         track_folders = [os.path.join(root,track) for track in os.listdir(root)]
         idxs = np.random.choice(range(len(track_folders)),size=num_examples,replace=False)
         for idx in idxs:
@@ -99,7 +101,7 @@ def generate_examples(model_ckp,with_coupling,remove,k, decoding_type,fade_time,
                             device=DEVICE)
             
 def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type,fade_time,save_dir,smaller=True,max_duration=60.):
-    model, params = load_model_checkpoint(model_ckp)
+    model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
     _=model.to(DEVICE) 
@@ -144,13 +146,15 @@ if __name__=='__main__':
     parser.add_argument('--fade_time',type=float,default=0.04)
     parser.add_argument("--num_examples",type=int)
     parser.add_argument("--data")
+    parser.add_argument("--from_subset", action = 'store_true')
     parser.add_argument('--memory')
     parser.add_argument('--source',nargs='*')
     parser.add_argument("--save_dir")
     args = parser.parse_args()
     
     with_coupling = args.with_coupling
-    save_dir = os.path.join("output",os.path.basename(args.model_ckp).split(".pt")[0]) if args.save_dir==None else args.save_dir
+    save_dir = "output" if args.save_dir==None else args.save_dir
+    save_dir = os.path.join(save_dir,os.path.basename(args.model_ckp).split(".pt")[0]) 
     os.makedirs(save_dir,exist_ok=True)
     
     # If a file with checkpoint paths is provided, read it and add to model_ckp
@@ -167,7 +171,7 @@ if __name__=='__main__':
         print("Generating with model :",os.path.basename(model_ckp))
         if args.data!=None:
             generate_examples(model_ckp,with_coupling,args.remove,args.k, args.decoding_type,
-                    fade_time=args.fade_time,num_examples=args.num_examples,data=args.data,save_dir=save_dir)
+                    fade_time=args.fade_time,num_examples=args.num_examples,data=args.data,save_dir=save_dir,from_subset=args.from_subset)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model_ckp,args.memory,args.source,

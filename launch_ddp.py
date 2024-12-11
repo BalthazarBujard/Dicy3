@@ -17,7 +17,7 @@ def train_parser():
     #parser.add_argument('--ignore',type=list,nargs='*',default=["drums", "percussions", "other"]) #problem passing this arg
     parser.add_argument('--freeze_backbone',action='store_true')
     #prRed("TRAINIGN BACKBONE")
-    parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],default=512)
+    parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],required=True)
     parser.add_argument('--learnable_cb',action='store_true')
     parser.add_argument('--codebook_loss_weight',type=float,default=0.25) #++ encoding et embeddings vont se rapprocher vite -> risque de collapse
     parser.add_argument('-head','--encoder_head',type=str,choices=['mean','attention'],default='mean')

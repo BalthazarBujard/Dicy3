@@ -81,23 +81,19 @@ def build_model(args):
     return seq2seq
 
 def build_ds(args):
+    
+    train_set = "train" if not args.train_subset else "train_subset"
 
-    D_A1="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A1"
-    D_A2="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A2"
-    T_A1 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A1"
-    T_A2 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A2"
-    T_A3 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A3"
+    D_A1=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{train_set}/A1"
+    D_A2=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{train_set}/A2"
+    T_A1 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A1"
+    T_A2 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A2"
+    T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A3"
 
-    moisesdb_train = "../data/moisesdb_v2/train"
+    moisesdb_train = f"../data/moisesdb_v2/{train_set}"
     moises_tracks = extract_all_groups(moisesdb_train,instruments_to_ignore=["drums", "percussions", "other"])
     
-    if args.train_subset:
-        num_files = 30
-        T_A1 = [os.path.join(T_A1,t)for t in sorted(os.listdir(T_A1))[:num_files]]
-        T_A2 = [os.path.join(T_A2,t)for t in sorted(os.listdir(T_A2))[:num_files]]
-        T_A3 = [os.path.join(T_A3,t)for t in sorted(os.listdir(T_A3))[:num_files]]
-        
-        moises_tracks = moises_tracks[:num_files]
+    
     
     if args.data=='all':
         train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
@@ -106,22 +102,17 @@ def build_ds(args):
     if args.data=='moises':
         train_roots=moises_tracks
 
-    D_A1="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/val/A1"
-    D_A2="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/val/A2"
-    T_A1 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/val/A1"
-    T_A2 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/val/A2"
-    T_A3 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/val/A3"
+    val_set = "val" if not args.train_subset else "val_subset"
+    
+    D_A1=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{val_set}/A1"
+    D_A2=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{val_set}/A2"
+    T_A1 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A1"
+    T_A2 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A2"
+    T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A3"
 
-    moisesdb_val = "../data/moisesdb_v2/val"
+    moisesdb_val = f"../data/moisesdb_v2/{val_set}"
     moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=["drums", "percussions", "other"])
 
-    if args.train_subset:
-        num_files = 10
-        T_A1 = [os.path.join(T_A1,t)for t in sorted(os.listdir(T_A1))[:num_files]]
-        T_A2 = [os.path.join(T_A2,t)for t in sorted(os.listdir(T_A2))[:num_files]]
-        T_A3 = [os.path.join(T_A3,t)for t in sorted(os.listdir(T_A3))[:num_files]]
-        
-        moises_tracks = moises_tracks[:num_files]
 
     if args.data=='all':
         val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
@@ -133,7 +124,7 @@ def build_ds(args):
     return train_roots,val_roots
 
 # WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
-def setup(rank, world_size,mastr_port=12356):
+def setup(rank, world_size,mastr_port=12355):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'
 
@@ -182,7 +173,7 @@ def main(rank, world_size, args):
     val_fetcher.device = rank
 
     if args.resume_ckp!='':
-        seq2seq, params = load_model_checkpoint(args.resume_ckp)
+        seq2seq, params, optim_state_dict = load_model_checkpoint(args.resume_ckp)
     
     else : seq2seq=build_model(args)
     
@@ -205,7 +196,9 @@ def main(rank, world_size, args):
     criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     
     model = seq2seq.to(rank)
-    ddp_model = myDDP(model, device_ids=[rank],find_unused_parameters=args.freeze_backbone==False or args.learnable_cb) #find unused if backbone train
+    ddp_model = myDDP(model, device_ids=[rank],
+                      find_unused_parameters=
+                      args.freeze_backbone==False or args.learnable_cb) #find unused if backbone train or learn codebook
     
     bb_params = ddp_model.module.encoder.encoder.backbone.parameters()
     rest_params = []
@@ -219,7 +212,6 @@ def main(rank, world_size, args):
     
     
     if args.resume_ckp!='':
-        optim_state_dict = torch.load(args.resume_ckp,map_location=torch.device('cpu'))['optimizer']
         if type(optim_state_dict) == list :
             for i,optim in enumerate(optim_state_dict):
                 optimizer[i].load_state_dict(optim)

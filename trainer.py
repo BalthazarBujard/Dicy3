@@ -8,6 +8,7 @@ from MusicDataset.MusicDataset_v2 import Fetcher
 from typing import Callable, Tuple
 from tqdm import tqdm
 from architecture.Seq2Seq import Seq2SeqCoupling,Seq2SeqBase
+from architecture.Model import load_model_checkpoint,myDDP
 from abc import ABC, abstractmethod
 from utils.utils import *
 from utils.metrics import compute_accuracy
@@ -83,6 +84,7 @@ class Seq2SeqTrainer(nn.Module):
         model = self.model.module if isinstance(self.model,DDP) else self.model #if ddp
         
         model_params = {"backbone_type":self.model.encoder.encoder.type,
+                        "freeze_backbone":self.model.encoder.encoder.frozen,
                         "dim":model.dim,
                         "pre_post_chunking":model.encoder.chunking_pre_post_encoding,
                         "vocab_size":self.model.codebook_size,
@@ -115,6 +117,37 @@ class Seq2SeqTrainer(nn.Module):
             "optimizer":optim_state_dict,
             "model_params":model_params,
             },"runs/coupling/"+ckp_name)
+    
+    #TODO : FIND HOW TO RELOAD CHECKPOINT DURING DDP TRAINING
+    def load_checkpoint(self,checkpoint_name):
+        print("ici avec rank :",self.gpu_id)
+        #torch.distributed.init_process_group("nccl",rank=self.gpu_id,world_size = torch.distributed.get_world_size())
+        torch.cuda.set_device(self.gpu_id)
+        torch.cuda.empty_cache()
+        #load ceckpoint
+        model, params, optim_state_dict = load_model_checkpoint(checkpoint_name)
+        #send to rank
+        device=torch.cuda.current_device()
+        print(device)
+        model = model.to(device)
+        #wrap inside DDP
+        model = myDDP(model, device_ids=[self.gpu_id],
+                      find_unused_parameters= not params['freeze_backbone'] or params['learnable_codebook']) 
+        
+        print("la")
+        #assign model to model attribute of trainer 
+        self.model = model
+        
+        #load optimizer
+        if type(optim_state_dict) == list :
+            for i,optim in enumerate(optim_state_dict):
+                self.optimizer[i].load_state_dict(optim)
+        
+        else : self.optimizer.load_state_dict(optim_state_dict)
+        
+        print("avant barier()")
+        torch.distributed.barrier()
+        print("apres barrier")
     
     def _forward(self,inputs:Munch) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         model = self.model.module if isinstance(self.model, DDP) else self.model
@@ -322,6 +355,7 @@ class Seq2SeqTrainer(nn.Module):
             else : 
                 val_loss = train_loss #for checkpooint saving
                 val_acc = train_acc
+                codebook_usage=best_codebook_usage
             
             
             val_losses.append(val_loss)    
@@ -335,7 +369,21 @@ class Seq2SeqTrainer(nn.Module):
                 best_codebook_usage = codebook_usage #like so they are not totally decorrelated during optim ?
                 if self.save_ckp:
                     if self.gpu_id==0 : #only save rank 0 model
+                        #print('save ckp')
                         self.save_checkpoint(self.trainer_name+".pt") #save ckp as run name and add .pt extension
+                    
+                    # # Synchronize across all ranks
+                    # The above code is using the `torch.distributed.barrier()` function to
+                    # synchronize all processes in a distributed setting. It ensures that all
+                    # processes reach a specific point in the code before any of them can proceed
+                    # further. In this case, it is used to ensure that rank 0 finishes saving before
+                    # the other processes can proceed.
+                    # torch.distributed.barrier()  # Ensure rank 0 finishes saving before others proceed
+
+                    # # Reload the checkpoint on non-zero ranks
+                    # if self.gpu_id != 0:
+                    #     checkpoint_name = f"runs/coupling/{self.trainer_name}.pt"
+                    #     self.load_checkpoint(checkpoint_name)
                 
             
             if self.gpu_id==0: #check rank

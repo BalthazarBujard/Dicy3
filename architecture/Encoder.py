@@ -25,6 +25,7 @@ class Backbone(nn.Module):
             assert mean==False, "If pooling, no average should be done."
         self.pooling=pooling #if backbone should condense infor with pooling. used as an intermediate feature for latent space analysis, normaly done in loacalEncoder
         self.output_final_proj = output_final_proj #flag to use either hidden layer output or final projection output
+        self.frozen = False
         
     @property
     def dim(self):
@@ -52,6 +53,7 @@ class Backbone(nn.Module):
     
     def freeze(self):
         self.backbone.requires_grad_(False)
+        self.frozen = True
     
     def freeze_feature_extractor(self):
         if self.type=="w2v":
@@ -65,7 +67,9 @@ class Backbone(nn.Module):
                 raise TypeError("Only HF or fairseq")
         else :
             raise NotImplementedError("No implementation for other that wav2vec2 backbone.")
-    
+
+        self.frozen=True
+        
     #def train(self, mode=True):
     #    self.backbone.train(mode)
     

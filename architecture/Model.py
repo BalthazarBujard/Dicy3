@@ -27,6 +27,7 @@ def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_non
     model_class = ckp["model_class"]
     state_dict = ckp["state_dict"]
     model_params = ckp["model_params"]
+    optimizer_state_dict = ckp['optimizer']
     
     #bb_ckp="../w2v_music_checkpoint.pt"
 
@@ -66,7 +67,7 @@ def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_non
     segmentation_startegy = model_params["segmentation"]
     model.segmentation = segmentation_startegy
     
-    return model, model_params
+    return model, model_params, optimizer_state_dict
 
 def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairseq") -> Backbone:
     #load pretrained backbone
