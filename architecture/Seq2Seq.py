@@ -8,6 +8,7 @@ import time
 from utils.utils import predict_topK
 from beam_search import BeamSearch, Candidate
 from typing import List
+from scipy.stats import entropy
 
 
 #TODO : IS THIS FUNCTION A METHOD OF SEQ2SEQBASE ?
@@ -339,6 +340,17 @@ class Seq2SeqBase(nn.Module):
         #print(probs.shape)
             
         return probs
+    
+    #PROBLEM WITH THIS CUSTOM FUNCTION IS THAT IF THE MODEL IS WELL TRAINED, THEN WE WILL FAVORISE UNWANTED SEQUENCES OVERS VALID ONES
+    def __beam_search_custom_fn(self,candidate:Candidate):
+        probs = torch.tensor(candidate.compute_prob())
+        llh=torch.log(probs)/(candidate.effective_length**0.75)
+        
+        states = torch.tensor(candidate.states)
+        states_count = torch.bincount(states[:candidate.effective_length],minlength=self.vocab_size)
+        H = entropy(states_count/sum(states_count))/torch.log(torch.tensor(self.vocab_size))
+        
+        return llh + 1*torch.log(H+1e-9)
 
     
     def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k : int, max_len : int):
@@ -350,7 +362,7 @@ class Seq2SeqBase(nn.Module):
         
         fn_args = {'memory':memory, 'memory_mask':memory_pad_mask}
 
-        beamsearch = BeamSearch(self.__beam_search_transition_fn, fn_args, terminal_state = eos)
+        beamsearch = BeamSearch(self.__beam_search_transition_fn, fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn)
 
         best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
         

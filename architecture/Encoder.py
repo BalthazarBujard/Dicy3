@@ -121,7 +121,7 @@ class Backbone(nn.Module):
             z = z[...,0] #remove time dimension
 
         #(B,D) if mean or pooling, else (B,L,D)
-        print(x.shape,z.shape)
+        
         return z
 
 #TODO : DOUBLE CHECK IF THIS IMPLEMENTATION IS CORRECT ESPECIALLY THE CREATE_MASK METHOD                
