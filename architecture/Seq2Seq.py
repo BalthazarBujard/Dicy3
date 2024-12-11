@@ -350,7 +350,7 @@ class Seq2SeqBase(nn.Module):
         states_count = torch.bincount(states[:candidate.effective_length],minlength=self.vocab_size)
         H = entropy(states_count/sum(states_count))/torch.log(torch.tensor(self.vocab_size))
         
-        return llh + 1*torch.log(H+1e-9)
+        return llh + 3*torch.log(H+1e-9)
 
     
     def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k : int, max_len : int):

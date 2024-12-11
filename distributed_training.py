@@ -193,7 +193,7 @@ def main(rank, world_size, args):
     else : k = int(k)
     
     PAD_IDX = seq2seq.special_tokens_idx["pad"] if seq2seq.use_special_tokens else -100 #pad index ignored for loss
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+    criterion = torch.nn.functional.cross_entropy #torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     
     model = seq2seq.to(rank)
     ddp_model = myDDP(model, device_ids=[rank],

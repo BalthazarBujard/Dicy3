@@ -238,8 +238,16 @@ class Seq2SeqTrainer(nn.Module):
         tgt_out = tgt_idx[:,1:] #ground truth outputs are the token indexes shifted to the right
         
         #logits : (B, T, vocab_size) and tgt_out : (B, T)
-        
-        loss_ce = self.criterion(logits.reshape(-1,logits.size(-1)), tgt_out.reshape(-1)) #reshqaped as (B*T,vocab_size) and (B*T,)
+        pad_idx = self.model.special_tokens_idx["pad"] if self.model.use_special_tokens else -100
+        #reshqaped as (B*T,vocab_size) and (B*T,)
+        y = logits.reshape(-1,logits.size(-1))
+        gt = tgt_out.reshape(-1)
+        density = torch.bincount(gt,minlength=self.model.vocab_size)
+        density = density/sum(density)
+        density = torch.where(density==0,1e-9,density)
+        weights = 1/density
+        weights = weights/sum(weights)
+        loss_ce = self.criterion(y, gt, ignore_index=pad_idx, weight = weights) 
         loss_commit = self.codebook_loss_alpha*codebook_loss
         
         #add codebook diversity loss ?
@@ -268,10 +276,11 @@ class Seq2SeqTrainer(nn.Module):
                 prYellow(f"GT {tgt_out[1].numpy(force=True)}")
                 prYellow(f"Pred {preds[2].numpy(force=True)}")
                 prYellow(f"GT {tgt_out[2].numpy(force=True)}")
+                prRed(f"Pred {torch.argmax(logits[2],-1).numpy(force=True)}")
                 prYellow(loss.item())
                 
-                prRed(f"Pred {torch.argmax(logits[0],-1).numpy(force=True)}")
-                prGreen(f"Probs {torch.sort(probs[0][:10],dim=-1,descending=True)[0][:,:5].numpy(force=True)}") #show the 5 highest probabilities for 10 first tokens
+                
+                #prGreen(f"Probs {torch.sort(probs[0][:10],dim=-1,descending=True)[0][:,:5].numpy(force=True)}") #show the 5 highest probabilities for 10 first tokens
         
         loss.backward()
         
