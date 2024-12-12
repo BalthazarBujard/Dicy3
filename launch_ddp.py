@@ -39,6 +39,7 @@ def train_parser():
     parser.add_argument('-decay','--weight_decay',type=float,default=1e-5)
     parser.add_argument('--reg_alpha',type=float,default=0.) # ++ -> probs seront uniforme : compromis entre variete et confidence
     parser.add_argument('--grad_accum',type=int,default=1)
+    parser.add_argument('--weighed_crossentropy',action='store_true')
     parser.add_argument('--k',type=float,default=0.1)
     parser.add_argument('--run_id',required=True)
     parser.add_argument('--train_subset',action='store_true') #to do small trainings to find good parameters

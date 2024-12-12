@@ -220,6 +220,9 @@ def main(rank, world_size, args):
     
     run_id = args.run_id
     
+    #weighed crossentropy
+    weighed = args.weighed_crossentropy
+    
     
     trainer = Seq2SeqTrainer(ddp_model,rank, criterion, optimizer, run_id,
                             segmentation=SEGMENTATION_STRATEGY,
@@ -228,7 +231,8 @@ def main(rank, world_size, args):
                             codebook_loss_weight=codebook_loss_weight,
                             chunk_size=args.chunk_duration,
                             track_size=args.track_duration,
-                            resume_epoch=args.resume_epoch)
+                            resume_epoch=args.resume_epoch,
+                            weighed_crossentropy=weighed)
     
     epochs = args.epochs
     trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha)

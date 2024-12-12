@@ -50,7 +50,8 @@ class Seq2SeqTrainer(nn.Module):
                  resume_epoch : int =0,
                  init_sample_temperature : float = 2.,
                  min_temperature : float = 0.5,
-                 with_decay : bool = False):
+                 with_decay : bool = False,
+                 weighed_crossentropy : bool = False):
         
         super().__init__()
         self.model=model
@@ -76,6 +77,8 @@ class Seq2SeqTrainer(nn.Module):
         self.k = k
         self.chunk_size=chunk_size
         self.track_size=track_size
+        
+        self.weighed_crossentropy = weighed_crossentropy
         
     def save_checkpoint(self, ckp_name):
         if not any(ckp_name.endswith(ext) for ext in (".pt",".pth")):
@@ -211,15 +214,29 @@ class Seq2SeqTrainer(nn.Module):
     #TODO : ADD reg_alpha to class attributes ?
     def _compute_loss(self,logits,tgt_out,reg_alpha,codebook_loss) -> torch.Tensor :
         
-        loss_ce = self.criterion(logits.reshape(-1,logits.size(-1)), tgt_out.reshape(-1)) #reshqaped as (B*T,vocab_size) and (B*T,)
+        y = logits.reshape(-1,logits.size(-1))
+        gt = tgt_out.reshape(-1)
+        
+        pad_idx = self.model.special_tokens_idx["pad"] if self.model.use_special_tokens else -100
+        weights = None
+        if self.weighed_crossentropy:
+            density = torch.bincount(gt,minlength=self.model.vocab_size)
+            density = density/sum(density)
+            density = torch.where(density==0,1e-9,density)
+            weights = 1/density
+            weights = weights/sum(weights)
+        
+        loss_ce = self.criterion(y, gt,ignore_index = pad_idx, weight = weights) #reshqaped as (B*T,vocab_size) and (B*T,)
+        
         loss_commit = self.codebook_loss_alpha*codebook_loss
         
         #add codebook diversity loss ?
         
         #entropy regularization --> maximize entropy = use most of vocabulary
-        probs = F.softmax(logits,dim=-1)
-        entropy = -1.*(torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean())
-        loss_entropy = reg_alpha*entropy
+        # probs = F.softmax(logits,dim=-1)
+        # entropy = -1.*(torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean())
+        # loss_entropy = reg_alpha*entropy
+        loss_entropy=0
         
         #totasl loss = crossentropy + codebook loss + (-entropy)
         loss = (loss_ce + loss_commit - loss_entropy)/self.grad_accum_steps 
@@ -237,31 +254,30 @@ class Seq2SeqTrainer(nn.Module):
         
         tgt_out = tgt_idx[:,1:] #ground truth outputs are the token indexes shifted to the right
         
-        #logits : (B, T, vocab_size) and tgt_out : (B, T)
-        pad_idx = self.model.special_tokens_idx["pad"] if self.model.use_special_tokens else -100
-        #reshqaped as (B*T,vocab_size) and (B*T,)
-        y = logits.reshape(-1,logits.size(-1))
-        gt = tgt_out.reshape(-1)
-        density = torch.bincount(gt,minlength=self.model.vocab_size)
-        density = density/sum(density)
-        density = torch.where(density==0,1e-9,density)
-        weights = 1/density
-        weights = weights/sum(weights)
-        loss_ce = self.criterion(y, gt, ignore_index=pad_idx, weight = weights) 
-        loss_commit = self.codebook_loss_alpha*codebook_loss
+        loss = self._compute_loss(logits, tgt_out, reg_alpha, codebook_loss)
+        # #logits : (B, T, vocab_size) and tgt_out : (B, T)
+        # pad_idx = self.model.special_tokens_idx["pad"] if self.model.use_special_tokens else -100
+        # #reshqaped as (B*T,vocab_size) and (B*T,)
+        # y = logits.reshape(-1,logits.size(-1))
+        # gt = tgt_out.reshape(-1)
+        # density = torch.bincount(gt,minlength=self.model.vocab_size)
+        # density = density/sum(density)
+        # density = torch.where(density==0,1e-9,density)
+        # weights = 1/density
+        # weights = weights/sum(weights)
+        # loss_ce = self.criterion(y, gt, ignore_index=pad_idx, weight = weights) 
+        # loss_commit = self.codebook_loss_alpha*codebook_loss
         
-        #add codebook diversity loss ?
+        # #add codebook diversity loss ?
         
-        #entropy regularization --> maximize entropy = use most of vocabulary
-        probs = F.softmax(logits,dim=-1)
-        entropy = -1.*(torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean())
-        loss_entropy = reg_alpha*entropy
+        # #entropy regularization --> maximize entropy = use most of vocabulary
+        # probs = F.softmax(logits,dim=-1)
+        # entropy = -1.*(torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean())
+        # loss_entropy = reg_alpha*entropy
         
-        #totasl loss = crossentropy + codebook loss + (-entropy)
-        loss = (loss_ce + loss_commit - loss_entropy)/self.grad_accum_steps 
+        # #totasl loss = crossentropy + codebook loss + (-entropy)
+        # loss = (loss_ce + loss_commit - loss_entropy)/self.grad_accum_steps 
         
-        #TODO : MODIFIER POUR DECODER BEAM SEARCH 
-        # -> ca n'a pas de sens car beam search c'est pour du decodage, ici les probas pour tous les steps sont deja calculees (a partir du teacher forcing)
         preds = predict_topK(self.k,logits,tgt_out) 
         
         acc = compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=self.model.special_tokens_idx["pad"])

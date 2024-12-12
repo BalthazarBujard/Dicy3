@@ -169,7 +169,7 @@ def parse_args():
     parser.add_argument('--task', choices=['all','model','quality','apa','similarity','none'],nargs="*")
     parser.add_argument('--model_ckp',nargs='*')
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
-    parser.add_argument("--split", choices = ['val','test'])
+    parser.add_argument("--split", choices = ['val','subset_val','test'])
     parser.add_argument('--k',type=float, default=0.1)
     #if already generated audio samples
     parser.add_argument("--generate",action='store_true')

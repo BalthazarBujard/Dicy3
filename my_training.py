@@ -43,6 +43,7 @@ def main():
     parser.add_argument('-decay','--weight_decay',type=float,default=1e-5)
     parser.add_argument('-reg_alpha',type=float,default=0.)
     parser.add_argument('-grad_accum',type=int,default=1)
+    parser.add_argument('-weighed','--weighed_crossentropy',action='store_true')
     parser.add_argument('-k',type=int,default=5)
     parser.add_argument('-data',type = str, choices=['canonne','moises','all'])
     parser.add_argument("--run_id",required=True)
@@ -215,6 +216,9 @@ def main():
 
     #----------top-K parameter---------------
     k = args.k
+    
+    #weighed crossentropy
+    weighed = args.weighed_crossentropy
 
     trainer = Seq2SeqTrainer(seq2seq, 0, criterion, optimizer, run_id,
                             segmentation=SEGMENTATION_STRATEGY,
@@ -223,7 +227,8 @@ def main():
                             codebook_loss_weight=codebook_loss_weight,
                             init_sample_temperature=init_temp,
                             min_temperature=min_temp,
-                            with_decay=with_decay)
+                            with_decay=with_decay,
+                            weighed_crossentropy=weighed)
 
     # %% 
     # launch training
@@ -232,7 +237,6 @@ def main():
     eval=val_fetcher!=None
     epochs = args.epochs
 
-    #TODO : add dimension to print, pre-post-chunkinbg,...
     prGreen(f"Training with \n len {MAX_TRACK_DURATION}s, \n resolution {MAX_CHUNK_DURATION}s, \n direction {dir},\n dim {dim}, \n vocab {vocab_size}\n {pre_post_chunking}-chunking")
 
     reg_alpha=args.reg_alpha
