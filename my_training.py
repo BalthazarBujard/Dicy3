@@ -46,7 +46,7 @@ def main():
     parser.add_argument('-weighed','--weighed_crossentropy',action='store_true')
     parser.add_argument('-k',type=int,default=5)
     parser.add_argument('-data',type = str, choices=['canonne','moises','all'])
-    parser.add_argument("--run_id",required=True)
+    parser.add_argument("--run_id",type=str)
 
     args=parser.parse_args()
 
@@ -68,6 +68,9 @@ def main():
 
     dir = "mix2stem" if DIRECTION == "stem" else "stem2mix"
     run_id = args.run_id#f"All_res{MAX_CHUNK_DURATION}s_len{MAX_TRACK_DURATION}s_{dir}_12" 
+    if run_id==None :
+        run_id = f"{args.data}_{args.chunk_duration}s_{args.track_duration}s_A{args.vocab_size}_{args.pre_post_chunking}_D{args.dim}"
+    
 
     if os.path.exists(f"runs/coupling/{run_id}.pt"):
         raise RuntimeError("'run_id' already exists")

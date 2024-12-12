@@ -625,8 +625,10 @@ class MusicContainer4dicy2(Dataset):
                         tracks[i] = np.concatenate([tracks[i],np.zeros(pad)]) 
                         native_tracks[i]=np.concatenate([native_tracks[i],np.zeros(pad_nat)]) 
             
-            track = np.mean(tracks,axis=0) #combined tracks
-            native_track = np.mean(native_tracks,axis=0)            
+            track = np.sum(tracks,axis=0)#np.mean(tracks,axis=0) #combined tracks
+            track = np.interp(track,(track.min(),track.max()),(-1,1))
+            native_track = np.sum(native_tracks,axis=0)#np.mean(native_tracks,axis=0)     
+            native_track = np.interp(native_track,(native_track.min(),native_track.max()),(-1,1))
         
         else :
             track,_ = load(track_path,sr=sampling_rate,mono=True,offset=t0,duration=duration)
@@ -779,7 +781,7 @@ class MusicCouplingDatasetv2(Dataset):
             start = self.indexes[i-1][-1]+1 if i>0 else 0 #length of last containers cumulated
             self.indexes[i] = [start,start+len(container)-1] #idx correspoinding to container i start at the end of last container and end at start + len -1 
         
-        self.sort_containers() #CAREFULL ONLY WORKS IF BOITH CONTAINERS HAVE TRACK NAMES WITH SIMILAR STRUCTURE. ok for clement cannone duos and trios, for moises should receive multi-track one by one
+        self.sort_containers() #CAREFULL ONLY WORKS IF ALL CONTAINERS HAVE TRACK NAMES WITH SIMILAR STRUCTURE. ok for clement cannone duos and trios, for moises should receive multi-track one by one
         
         #self.augment_inverse_tracks()
         
@@ -805,6 +807,7 @@ class MusicCouplingDatasetv2(Dataset):
         
         if self.segmentation_strategy!='onset':
             mix_chunks = np.mean([[chunks for chunks in self.containers[i][chunk_idx][0]] for i in other_idx],axis=0) #combine chunks : (N,samples)
+            #mix_chunks = [np.interp(chunk,(chunk.min(),chunk.max()),(-1,1)) for chunk in mix_chunks]
         
 
         else :
@@ -822,7 +825,8 @@ class MusicCouplingDatasetv2(Dataset):
                     track = np.concatenate([track,np.zeros(pad)])
                 mix.append(track)
             
-            mix = np.mean(mix,axis=0)            
+            mix = np.mean(mix,axis=0)
+            #mix = np.interp(mix,(mix.min(),mix.max()),(-1,1))
             mix_chunks = self.containers[0].segment_track(mix, 'onset')
                 
         

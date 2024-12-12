@@ -125,16 +125,16 @@ class Seq2SeqTrainer(nn.Module):
     def load_checkpoint(self,checkpoint_name):
         print("ici avec rank :",self.gpu_id)
         #torch.distributed.init_process_group("nccl",rank=self.gpu_id,world_size = torch.distributed.get_world_size())
-        torch.cuda.set_device(self.gpu_id)
-        torch.cuda.empty_cache()
+        # torch.cuda.set_device(self.gpu_id)
+        # torch.cuda.empty_cache()
         #load ceckpoint
         model, params, optim_state_dict = load_model_checkpoint(checkpoint_name)
         #send to rank
-        device=torch.cuda.current_device()
-        print(device)
-        model = model.to(device)
+        # device=torch.cuda.current_device()
+        # print(device)
+        model = model.to(self.gpu_id)
         #wrap inside DDP
-        model = myDDP(model, device_ids=[self.gpu_id],
+        model = myDDP(model, device_ids=[int(self.gpu_id)],
                       find_unused_parameters= not params['freeze_backbone'] or params['learnable_codebook']) 
         
         print("la")
@@ -255,28 +255,6 @@ class Seq2SeqTrainer(nn.Module):
         tgt_out = tgt_idx[:,1:] #ground truth outputs are the token indexes shifted to the right
         
         loss = self._compute_loss(logits, tgt_out, reg_alpha, codebook_loss)
-        # #logits : (B, T, vocab_size) and tgt_out : (B, T)
-        # pad_idx = self.model.special_tokens_idx["pad"] if self.model.use_special_tokens else -100
-        # #reshqaped as (B*T,vocab_size) and (B*T,)
-        # y = logits.reshape(-1,logits.size(-1))
-        # gt = tgt_out.reshape(-1)
-        # density = torch.bincount(gt,minlength=self.model.vocab_size)
-        # density = density/sum(density)
-        # density = torch.where(density==0,1e-9,density)
-        # weights = 1/density
-        # weights = weights/sum(weights)
-        # loss_ce = self.criterion(y, gt, ignore_index=pad_idx, weight = weights) 
-        # loss_commit = self.codebook_loss_alpha*codebook_loss
-        
-        # #add codebook diversity loss ?
-        
-        # #entropy regularization --> maximize entropy = use most of vocabulary
-        # probs = F.softmax(logits,dim=-1)
-        # entropy = -1.*(torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean())
-        # loss_entropy = reg_alpha*entropy
-        
-        # #totasl loss = crossentropy + codebook loss + (-entropy)
-        # loss = (loss_ce + loss_commit - loss_entropy)/self.grad_accum_steps 
         
         preds = predict_topK(self.k,logits,tgt_out) 
         
@@ -405,7 +383,7 @@ class Seq2SeqTrainer(nn.Module):
                     # the other processes can proceed.
                     # torch.distributed.barrier()  # Ensure rank 0 finishes saving before others proceed
 
-                    # # Reload the checkpoint on non-zero ranks
+                    # # # Reload the checkpoint on non-zero ranks
                     # if self.gpu_id != 0:
                     #     checkpoint_name = f"runs/coupling/{self.trainer_name}.pt"
                     #     self.load_checkpoint(checkpoint_name)

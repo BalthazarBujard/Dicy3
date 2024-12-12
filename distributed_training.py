@@ -253,6 +253,12 @@ if __name__=='__main__':
     os.environ["CUDA_VISIBLE_DEVICES"]=args.device_ids
     
     run_id=args.run_id
+    
+    if run_id==None :
+        run_id = f"{args.data}_{args.chunk_duration}s_{args.track_duration}s_A{args.vocab_size}_{args.pre_post_chunking}_D{args.dim}"
+        #run_id+= "learn_bb" if not args.freeze_backbone else ""
+    
+    
     new_run_id=run_id
     i=1
     while os.path.exists(f"runs/coupling/{new_run_id}.pt") and args.resume_ckp=='': #find new name if not resume training

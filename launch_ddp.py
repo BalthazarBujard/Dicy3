@@ -41,7 +41,7 @@ def train_parser():
     parser.add_argument('--grad_accum',type=int,default=1)
     parser.add_argument('--weighed_crossentropy',action='store_true')
     parser.add_argument('--k',type=float,default=0.1)
-    parser.add_argument('--run_id',required=True)
+    parser.add_argument('--run_id',type=str)
     parser.add_argument('--train_subset',action='store_true') #to do small trainings to find good parameters
     parser.add_argument('--data',choices=['all','canonne','moises'])
     parser.add_argument('-restart','--restart_codebook',action='store_true')
