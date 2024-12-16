@@ -10,6 +10,7 @@ from architecture.Model import build_backbone
 from wav2vec2.wav2vec2_utils import DataCollatorForWav2Vec2 # type: ignore
 from MusicDataset.MusicDataset_v2 import MusicContainer,Fetcher,MusicDataCollator
 from sklearn.cluster import MiniBatchKMeans
+from sklearn.preprocessing import StandardScaler
 #from torch_kmeans import KMeans
 from torch.utils.data import DataLoader
 from transformers import Wav2Vec2FeatureExtractor
@@ -19,7 +20,7 @@ import torch
 from typing import List
 
 #%%
-def generate_codebook(codebook_sizes : List[int], dim : int):
+def generate_codebook(codebook_sizes : List[int], dim : int, normalize : bool = False):
     
     #codebook_size=16
 
@@ -71,6 +72,8 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
     # kmeans
     k_means_batch_size=int(batch_size*max_duration*sr/400) #corresponds to the number of samples per batch. 400 is approx the subsample coeficient (1 sample is 0.025s)
 
+    scaler = StandardScaler()
+    
     #iterate over codebook sizes
     for codebook_size in codebook_sizes:
         torch.cuda.empty_cache() #free cached ememory ?
@@ -93,7 +96,11 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
                 z = model(x)
                 
                 #reshape as N,latent_dim and to numpy for sklearn compatibility
-                z = z.reshape(-1,z.size(-1)).numpy(force=True)
+                z = z.reshape(-1,z.size(-1)).numpy(force=True) #(B,dim)
+                
+                #TODO : JE CROIS IL FAUT FAIRE UN TRANSPOSE POUR FAIRE LA NORMALISATION DECRITE
+                if normalize:
+                    z = scaler.fit_transform(z)
                 
                 #partial fit kmeans
                 k_means.partial_fit(z)
@@ -112,7 +119,7 @@ def generate_codebook(codebook_sizes : List[int], dim : int):
             #save centers for later use as VQ at end of epoch
             centers=k_means.cluster_centers_
             prYellow(f"Saving kmeans centers...")
-            np.save(f"clustering/kmeans_centers_{codebook_size}_{dim}.npy",centers,allow_pickle=True)
+            np.save(f"clustering/kmeans_centers_{codebook_size}_{dim}{"_normalized" if normalize else ""}.npy",centers,allow_pickle=True)
             
 
 

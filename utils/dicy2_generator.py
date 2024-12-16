@@ -87,7 +87,8 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
 def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                       chunk_segmentation : str, 
                       with_coupling : bool, k : int, decoding_type : str,
-                      generator : Dicy2Generator):
+                      generator : Dicy2Generator,
+                      entropy_weight : float):
 
     label_type = ListLabel
     
@@ -111,7 +112,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         encoded_src, src_idx, src_pad_mask = model.encode(src_data.src, src_data.src_padding_masks) 
         
         if with_coupling: #if we want to generate a more complex response 
-            _,tgt_idx = model.coupling(encoded_src, src_pad_mask, k, max_len=len(encoded_src[0]),decoding_type=decoding_type)
+            _,tgt_idx = model.coupling(encoded_src, src_pad_mask, k, max_len=len(encoded_src[0]),decoding_type=decoding_type,entropy_weight=entropy_weight)
         
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
         
@@ -204,10 +205,10 @@ def concatenate_response(memory:np.ndarray, memory_chunks:np.ndarray, queries:np
 #TODO : USE SLIDING WINDOW TO GENERATE NEW CHUNKS LABELS WITH SOME CONTEXT
 @torch.no_grad()
 def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2SeqBase,str],
-                      k:int, with_coupling : bool, decoding_type : str,
+                      k:int, with_coupling : bool, decoding_type : str, entropy_weight : float,
                       max_track_duration:float,max_chunk_duration:float,
                       track_segmentation:str, chunk_segmentation:str,
-                      concat_fade_time=0.04, remove=True, max_backtrack = None,
+                      concat_fade_time=0.04, remove=False, max_backtrack = None,
                       device=None,
                       sampling_rate=16000, tgt_sampling_rates : dict = {'solo':None,'mix':None},
                       max_output_duration=None, mix_channels=2, timestamps=None,
@@ -248,7 +249,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     
     
     prYellow("Generating reponse...")
-    queries, searches_for = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator)
+    queries, searches_for = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, entropy_weight)
     source = src_ds.native_track
 
     prYellow("Concatenate response...")
