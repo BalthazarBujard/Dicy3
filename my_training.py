@@ -46,6 +46,7 @@ def main():
     parser.add_argument('-weighed','--weighed_crossentropy',action='store_true')
     parser.add_argument('-k',type=int,default=5)
     parser.add_argument('-data',type = str, choices=['canonne','moises','all'])
+    parser.add_argument("--train_subset",action="store_true")
     parser.add_argument("--run_id",type=str)
 
     args=parser.parse_args()
@@ -80,37 +81,44 @@ def main():
 
     #dataset, loader and fetcher
 
-    D_A1="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A1"
-    D_A2="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/train/A2"
-    T_A1 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A1"
-    T_A2 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A2"
-    T_A3 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/train/A3"
+    train_set = "train" if not args.train_subset else "train_subset"
 
-    moisesdb_train = "../data/moisesdb_v2/train"
-    moises_tracks = extract_all_groups(moisesdb_train,IGNORE)
-    if args.data == 'all':
+    D_A1=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{train_set}/A1"
+    D_A2=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{train_set}/A2"
+    T_A1 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A1"
+    T_A2 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A2"
+    T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A3"
+
+    moisesdb_train = f"../data/moisesdb_v2/{train_set}"
+    moises_tracks = extract_all_groups(moisesdb_train,instruments_to_ignore=["drums", "percussions", "other"])
+    
+    
+    
+    if args.data=='all':
         train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
-    elif args.data == 'canonne':
+    if args.data=='canonne':
         train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]
-    else :
+    if args.data=='moises':
         train_roots=moises_tracks
 
-    D_A1="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/val/A1"
-    D_A2="/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/val/A2"
-    T_A1 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/val/A1"
-    T_A2 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/val/A2"
-    T_A3 = "/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/val/A3"
+    val_set = "val" if not args.train_subset else "val_subset"
+    
+    D_A1=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{val_set}/A1"
+    D_A2=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{val_set}/A2"
+    T_A1 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A1"
+    T_A2 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A2"
+    T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A3"
 
-    moisesdb_val = "../data/moisesdb_v2/val"
-    moises_tracks = extract_all_groups(moisesdb_val,IGNORE)
+    moisesdb_val = f"../data/moisesdb_v2/{val_set}"
+    moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=["drums", "percussions", "other"])
 
-    if args.data == 'all':
+
+    if args.data=='all':
         val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
-    elif args.data == 'canonne':
+    elif args.data=='canonne':
         val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]
-    else :
+    elif args.data=='moises':
         val_roots=moises_tracks
-
     #track_folder = "../data/moisesdb_v0.1/737356b2-ce9c-448b-877b-e42b3ed94563"
     #roots = generate_couples(track_folder)
 
@@ -202,8 +210,8 @@ def main():
     # %% 
     # build trainer
     PAD_IDX = seq2seq.special_tokens_idx["pad"] if seq2seq.use_special_tokens else -100 #pad index ignored for loss
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-
+    criterion = torch.nn.functional.cross_entropy #torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+    
     weight_decay= args.weight_decay #ADD WEIGHT DECAY AND INCREASE LAYER NORM EPS IN DECISION IF INSTABILITY
     betas=(0.9, 0.999) #default betas for Adam
     grad_accum_steps=args.grad_accum #effective batch size = batch_size * grad_accum

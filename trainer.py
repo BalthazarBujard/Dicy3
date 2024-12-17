@@ -175,7 +175,7 @@ class Seq2SeqTrainer(nn.Module):
         acc=0
         cb_usage=0
         self.model.eval()
-        for _ in range(len(eval_fetcher)):
+        for _ in range(1):#range(len(eval_fetcher)):
             inputs = next(eval_fetcher)
             
             logits,tgt,tgt_idx,codebook_loss = self._forward(inputs)
@@ -199,16 +199,28 @@ class Seq2SeqTrainer(nn.Module):
         
         return loss, acc, cb_usage
     
-    def plot_loss(self, epoch, train_losses, val_losses):
-        plt.figure(figsize=(10,10),dpi=150)
-        plt.plot(range(1,epoch+2),train_losses,label="train loss")
+    def plot_loss(self, epoch, train_losses, val_losses, train_acc, val_acc):
+        fig, ax1 = plt.subplots(figsize=(10,10),dpi=150)
+        ax2=ax1.twinx()
+        epochs = range(1,epoch+2)
+        #plt.figure(figsize=(10,10),dpi=150)
+        ax1.plot(epochs,train_losses,label="train loss", color="tab:blue")
+        ax2.plot(epochs,train_acc,label="train accuracy",color="tab:green")
         if len(val_losses) != 0:
-            plt.plot(range(1,epoch+2),val_losses,label="val loss")
-        plt.legend()
-        plt.xlabel("Epochs")
-        plt.ylabel("Cross Entropy")
-        plt.savefig(f"runs/coupling/Loss_{self.trainer_name}.png")
-        plt.show()
+            ax1.plot(epochs,val_losses,label="val loss", color="tab:orange")
+            ax2.plot(epochs, val_acc, label="val accuracy", color="tab:red")
+        
+        lines, labels = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax2.legend(lines + lines2, labels + labels2, loc=0)
+
+        
+        ax1.set_xlabel("Epochs")
+        ax1.set_ylabel("Cross Entropy")
+        ax2.set_ylabel("Accuracy")
+        fig.savefig(f"runs/coupling/Loss_{self.trainer_name}.png")
+        fig.tight_layout()
+        fig.show()
     
     
     #TODO : ADD reg_alpha to class attributes ?
@@ -296,6 +308,8 @@ class Seq2SeqTrainer(nn.Module):
         
         train_losses=[]
         val_losses=[]
+        train_accs = []
+        val_accs=[]
         epoch_0=self.resume_epoch
         if self.resume_epoch>0:
             try :
@@ -324,7 +338,7 @@ class Seq2SeqTrainer(nn.Module):
             except:
                 pass
             
-            for step in range(len(train_fetcher)):
+            for step in range(1):#range(len(train_fetcher)):
                 if self.gpu_id==0:
                     progress_bar.update(1) #update progress bar
                 iter_count+=1
@@ -361,11 +375,14 @@ class Seq2SeqTrainer(nn.Module):
                 codebook_usage=best_codebook_usage
             
             
-            val_losses.append(val_loss)    
+            val_losses.append(val_loss) 
+            
+            train_accs.append(train_acc)
+            val_accs.append(val_acc)   
             
             if epoch-epoch_0>0 and trial==None:   
                 if self.gpu_id==0:
-                    self.plot_loss(epoch-epoch_0,train_losses, val_losses)
+                    self.plot_loss(epoch-epoch_0,train_losses, val_losses, train_accs, val_accs)
             
             if val_loss<best_loss:
                 best_loss=val_loss
@@ -390,7 +407,7 @@ class Seq2SeqTrainer(nn.Module):
                 
             
             if self.gpu_id==0: #check rank
-                np.save(f"runs/coupling/eval_{self.trainer_name}.npy",{"train_loss":train_losses,"test_loss":val_losses,"train_acc":train_acc,"test_acc":val_acc},allow_pickle=True)
+                np.save(f"runs/coupling/eval_{self.trainer_name}.npy",{"train_loss":train_losses,"test_loss":val_losses,"train_acc":train_accs,"test_acc":val_accs},allow_pickle=True)
         
         if trial!=None:
             return best_loss,best_codebook_usage
