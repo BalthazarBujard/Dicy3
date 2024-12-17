@@ -175,7 +175,7 @@ class Seq2SeqTrainer(nn.Module):
         acc=0
         cb_usage=0
         self.model.eval()
-        for _ in range(1):#range(len(eval_fetcher)):
+        for _ in range(len(eval_fetcher)):
             inputs = next(eval_fetcher)
             
             logits,tgt,tgt_idx,codebook_loss = self._forward(inputs)
@@ -338,7 +338,7 @@ class Seq2SeqTrainer(nn.Module):
             except:
                 pass
             
-            for step in range(1):#range(len(train_fetcher)):
+            for step in range(len(train_fetcher)):
                 if self.gpu_id==0:
                     progress_bar.update(1) #update progress bar
                 iter_count+=1
