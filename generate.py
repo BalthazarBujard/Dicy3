@@ -11,7 +11,7 @@ import argparse
 from librosa import load
 
 
-def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, entropy_weight, fade_time, num_examples, data, save_dir, from_subset=False):
+def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temperature, fade_time, num_examples, data, save_dir, from_subset=False):
     model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -67,7 +67,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, entrop
             memory = tracks[id] 
             src = [tracks[i] for i in range(len(tracks)) if i != id ]
 
-            output = generate(memory,src,model,k,with_coupling,decoding_type, entropy_weight,
+            output = generate(memory,src,model,k,with_coupling,decoding_type, temperature,
                             MAX_TRACK_DURATION,MAX_CHUNK_DURATION,
                             track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
@@ -92,7 +92,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, entrop
             memory = tracks[id] 
             src = [tracks[i] for i in range(len(tracks)) if i != id ]
 
-            output = generate(memory,src,model,k,with_coupling, decoding_type, entropy_weight,
+            output = generate(memory,src,model,k,with_coupling, decoding_type, temperature,
                             MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
                             concat_fade_time=fade_time,
@@ -100,7 +100,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, entrop
                             save_dir=save_dir,
                             device=DEVICE)
             
-def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, entropy_weight,fade_time,save_dir,smaller=True,max_duration=60.):
+def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, fade_time,save_dir,smaller=True,max_duration=60.):
     model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -121,7 +121,7 @@ def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type,
         timestamps = [t0/sr,t1/sr] #in seconds
     else : timestamps=None
     
-    output = generate(memory,src,model,k,with_coupling,decoding_type, entropy_weight,
+    output = generate(memory,src,model,k,with_coupling,decoding_type, temperature,
                       MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
                             concat_fade_time=fade_time,
@@ -142,7 +142,7 @@ if __name__=='__main__':
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
     parser.add_argument("--decoding_type", type = str, choices=['greedy','beam'])
-    parser.add_argument("--entropy_weight", type = float, default=1.)
+    parser.add_argument("--temperature", type = float, default=1.)
     parser.add_argument("--k",type=float,default=0.1)
     parser.add_argument('--fade_time',type=float,default=0.04)
     parser.add_argument("--num_examples",type=int)
@@ -171,12 +171,12 @@ if __name__=='__main__':
     for model_ckp in file_ckps:
         print("Generating with model :",os.path.basename(model_ckp))
         if args.data!=None:
-            generate_examples(model_ckp,with_coupling,args.remove,args.k, args.decoding_type, args.entropy_weight,
+            generate_examples(model_ckp,with_coupling,args.remove,args.k, args.decoding_type, args.temperature,
                     fade_time=args.fade_time,num_examples=args.num_examples,data=args.data,save_dir=save_dir,from_subset=args.from_subset)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model_ckp,args.memory,args.source,
-                            args.with_coupling,args.remove,args.k,args.decoding_type, args.entropy_weight,
+                            args.with_coupling,args.remove,args.k,args.decoding_type, args.temperature,
                             args.fade_time,
                             save_dir)
         else : raise ValueError("Either specify 'data' or give a source and memory path")

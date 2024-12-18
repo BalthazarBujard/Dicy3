@@ -296,7 +296,8 @@ class Seq2SeqBase(nn.Module):
     # beam search transition function : computes the probabilities over the state space given an input sequence of states 
     def __beam_search_transition_fn(self,candidates: List[List[Candidate]], 
                                     memory : torch.Tensor, 
-                                    memory_mask : torch.Tensor) -> torch.Tensor:
+                                    memory_mask : torch.Tensor,
+                                    temperature : float) -> torch.Tensor:
         
         B,T_src,dim=memory.shape
         beam_width = len(candidates[0])
@@ -333,7 +334,7 @@ class Seq2SeqBase(nn.Module):
                                       memory_pad_mask=memory_mask) # (B*beam_width,T,vocab_size) 
         
         logits = logits.view(B,beam_width,logits.size(1), logits.size(2)) #(B,beam_width,T,vocab_size)
-        
+        logits = logits/temperature
         #only take last step for each elem in batch and beam
         probs = torch.softmax(logits,dim=-1)[:,:,-1,:] #(B,beam_width,vocab_size)
         
@@ -346,22 +347,22 @@ class Seq2SeqBase(nn.Module):
         probs = torch.tensor(candidate.compute_prob())
         llh=torch.log(probs)/(candidate.effective_length**0.75)
         
-        states = torch.tensor(candidate.states)
-        states_count = torch.bincount(states[:candidate.effective_length],minlength=self.vocab_size)
-        H = entropy(states_count/sum(states_count))/torch.log(torch.tensor(self.vocab_size))
+        # states = torch.tensor(candidate.states)
+        # states_count = torch.bincount(states[:candidate.effective_length],minlength=self.vocab_size)
+        # H = entropy(states_count/sum(states_count))/torch.log(torch.tensor(self.vocab_size))
         
         return llh #+ 3*torch.log(H+1e-9)
 
     
-    def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k : int, max_len : int, entropy_weight : float):
+    def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k : int, max_len : int, temperature : float):
         
         B = memory.size(0)
         
         x_init = torch.tensor([[self.special_tokens_idx['sos'].item()] for _ in range(B)], device=self.device)
         eos = self.special_tokens_idx['eos'].item()
         
-        trans_fn_args = {'memory':memory, 'memory_mask':memory_pad_mask}
-        score_fn_args = {'entropy_weight':entropy_weight}
+        trans_fn_args = {'memory':memory, 'memory_mask':memory_pad_mask,"temperature":temperature}
+        score_fn_args = {'entropy_weight':None} #TODO : REMOVE THIS SINCE WE USE TEMPERATURE NOW
         
         beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn, score_fn_args=score_fn_args)
 
@@ -375,13 +376,13 @@ class Seq2SeqBase(nn.Module):
 
     
     def decode(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor,
-               k:int, max_len : int, decoding_type : str, entropy_weight : float = 1) -> Tuple[torch.Tensor, torch.Tensor]:
+               k:int, max_len : int, decoding_type : str, temperature : float = 1) -> Tuple[torch.Tensor, torch.Tensor]:
         
         if decoding_type == "greedy":
             tgt, tgt_idx = self._greedy_decoding(memory, memory_pad_mask, k, max_len)
             
         elif decoding_type=="beam":
-            tgt, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, entropy_weight)
+            tgt, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, temperature)
         
         else : raise ValueError(f"Wrong 'decoding_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
         
@@ -467,7 +468,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
     #generate sequence of labels to "couple" the input sequence of labels (memory)
     @torch.no_grad
     def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
-                 k:int, max_len : int, decoding_type : str, entropy_weight : float): 
+                 k:int, max_len : int, decoding_type : str, temperature : float): 
         
         src = encoded_src
         
@@ -476,16 +477,16 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         memory = self.decision.encode(src,src_mask=None,src_pad_mask=src_pad_mask) #encode src once -> pass through Transformer encoder if enc-dec else will be = src
         
-        tgt, tgt_idx = self.decode(memory, src_pad_mask, k, max_len, decoding_type, entropy_weight)
+        tgt, tgt_idx = self.decode(memory, src_pad_mask, k, max_len, decoding_type, temperature)
         
         return tgt, tgt_idx 
     
     @torch.no_grad 
-    def generate(self,src : torch.Tensor ,src_pad_masks : torch.Tensor, k : int = 1, max_len=None, entropy_weight : float = 1):
+    def generate(self,src : torch.Tensor ,src_pad_masks : torch.Tensor, k : int = 1, max_len=None, temperature : float = 1):
         
         encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
         
-        tgt, tgt_idx = self.coupling(encoded_src, src_pad_mask, k, max_len, entropy_weight) #generate sequence of expected labels for coupling
+        tgt, tgt_idx = self.coupling(encoded_src, src_pad_mask, k, max_len, temperature) #generate sequence of expected labels for coupling
         
         return tgt, tgt_idx #tgt probably not used but not bad idea    
         
