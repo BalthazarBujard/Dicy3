@@ -260,6 +260,7 @@ class LocalEncoder(nn.Module):
             input_lengths = (1 - padding_mask.long()).sum(-1)
             # apply conv formula to get real output_lengths
             output_lengths = self.encoder.backbone._get_feat_extract_output_lengths(input_lengths)
+            output_lengths=torch.where(output_lengths>x.size(1),x.size(1),output_lengths) #verify that output length is not bigger than actual length
 
             padding_mask = torch.zeros(
                 x.shape[:2], dtype=x.dtype, device=x.device
@@ -316,6 +317,9 @@ class LocalEncoder(nn.Module):
             #reshape as B*chunks, L', D
             x=x.view(B*chunks,-1,x.size(-1))
 
+            #compute true padding for cases where padding exceeds new chunks size
+            pad_step = pad%T 
+            pad_chunks = pad//T
 
             #process mask with new padded x
             padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
@@ -323,10 +327,15 @@ class LocalEncoder(nn.Module):
             #and len of x[:,:-pad] is equivalent to the output length of max_samples
             padding_mask = self._process_padding_mask(x[:,:-pad], padding_mask) #(B*chunks,L-pad)
             padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L-pad) for easier append of pad mask
-            pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
-            pad_step_mask[:,-1]=True #the last 'pad' steps of the last chunk are padded
+            
+            pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad_step,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
+            pad_step_mask[:,-(pad_chunks+1)]=True #the last 'pad' steps of the last chunk are padded
             padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,L')
-            padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, L'            
+            if pad_chunks>0:
+                padding_mask[:,-pad_chunks:]=True
+            padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, L'        
+            
+            #print(x.shape, padding_mask.shape, padding_mask)    
 
         
         
