@@ -205,10 +205,10 @@ class Seq2SeqTrainer(nn.Module):
         epochs = range(1,epoch+2)
         #plt.figure(figsize=(10,10),dpi=150)
         ax1.plot(epochs,train_losses,label="train loss", color="tab:blue")
-        ax2.plot(epochs,train_acc,label="train accuracy",color="tab:green")
+        ax2.plot(epochs,train_acc,"--",label="train accuracy",color="tab:green")
         if len(val_losses) != 0:
             ax1.plot(epochs,val_losses,label="val loss", color="tab:orange")
-            ax2.plot(epochs, val_acc, label="val accuracy", color="tab:red")
+            ax2.plot(epochs, val_acc, "--",label="val accuracy", color="tab:red")
         
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
@@ -220,6 +220,7 @@ class Seq2SeqTrainer(nn.Module):
         ax2.set_ylabel("Accuracy")
         fig.savefig(f"runs/coupling/Loss_{self.trainer_name}.png")
         fig.tight_layout()
+        plt.grid()
         fig.show()
     
     
@@ -320,6 +321,7 @@ class Seq2SeqTrainer(nn.Module):
                 pass
         
         best_loss = float('inf')
+        best_acc = 0
         best_codebook_usage=0
         
         init_temperature = self.codebook_sample_temperature
@@ -384,7 +386,7 @@ class Seq2SeqTrainer(nn.Module):
                 if self.gpu_id==0:
                     self.plot_loss(epoch-epoch_0,train_losses, val_losses, train_accs, val_accs)
             
-            if val_loss<best_loss:
+            if val_acc>best_acc:#val_loss<best_loss:
                 best_loss=val_loss
                 best_codebook_usage = codebook_usage #like so they are not totally decorrelated during optim ?
                 if self.save_ckp:
