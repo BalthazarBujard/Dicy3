@@ -247,7 +247,7 @@ class LocalEncoder(nn.Module):
             
             else :
                 mask = ~padding_mask #true is padding and we sum accross not padded tokens
-                x = torch.sum(x*mask.unsqueeze(-1),dim=1)/torch.sum(mask,dim=1,keepdim=True)
+                x = torch.sum(x*mask.unsqueeze(-1),dim=1)/(torch.sum(mask,dim=1,keepdim=True)+1e-12)
                 
             
         return x
@@ -325,7 +325,7 @@ class LocalEncoder(nn.Module):
             padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
             #process mask with x without the padding -> avoid appending True to mask where it shouldnt
             #and len of x[:,:-pad] is equivalent to the output length of max_samples
-            padding_mask = self._process_padding_mask(x[:,:-pad], padding_mask) #(B*chunks,L-pad)
+            padding_mask = self._process_padding_mask(x[:,:-pad_step], padding_mask) #(B*chunks,L-pad)
             padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L-pad) for easier append of pad mask
             
             pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad_step,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
