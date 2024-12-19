@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from typing import Tuple
+from pathlib import Path
 
 #wrapper class to get eattributes without changing whole code
 class myDDP(DDP):
@@ -95,6 +96,37 @@ def build_quantizer(dim, vocab_size, learnable_codebook, restart)-> KmeansQuanti
 def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None, chunking:str='pre') -> LocalEncoder:
     encoder = LocalEncoder(backbone,quantizer,head_module,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
     return encoder
+
+def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone : bool, dim : int, 
+                       vocab_size : int, learnable_codebook : bool, restart_codebook : bool,
+                       chunking : str, encoder_head : str, condense_type : str = None):
+    output_final_proj = dim==256 #if model dimension is 256 we want the final projection output, else 768 hidden layer output dim
+    
+    #load pretrained backbone
+    backbone=build_backbone(backbone_ckp,backbone_type,
+                            mean=False,pooling=False, 
+                            output_final_proj=output_final_proj,
+                            fw="fairseq") #no mean or pooling for backbone in seq2seq, collapse done in encoder
+    
+    if freeze_backbone:
+        backbone.eval() # SI ON UNFREEZE BB IL FAUT TRAIN VQ
+        backbone.freeze() #freeze backbone
+    
+    elif learnable_codebook == False:
+        raise ValueError("Train VQ if backbone in learning.")
+    
+    else : #trainable bb and codebook -> only freeze feature extractor (CNN)
+        backbone.freeze_feature_extractor()
+       
+    
+    #vector quantizer  
+    vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook)
+    
+    assert chunking in ['pre','post']
+    localEncoder=build_localEncoder(backbone, vq, encoder_head, condense_type,chunking)
+    
+    return localEncoder
+
 
 #create class for decision module to handle forward call in seq2seq
 def build_decision(dim, layers, vocab_size , inner_dim=2048, heads=8, dropout=0.1, decoder_only=False, norm_first=True) -> Decision:

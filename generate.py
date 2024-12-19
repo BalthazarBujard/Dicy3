@@ -52,7 +52,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
 
             a1 = sorted(os.listdir(A1))[track_idx]
             a2 = sorted(os.listdir(A2))[track_idx]
-
+            
             a1 = os.path.join(A1,a1)
             a2 = os.path.join(A2,a2)
             
@@ -100,7 +100,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
                             save_dir=save_dir,
                             device=DEVICE)
             
-def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, fade_time,save_dir,smaller=True,max_duration=60.):
+def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, fade_time,save_dir,smaller,max_duration=60.):
     model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -143,9 +143,10 @@ if __name__=='__main__':
     parser.add_argument("--remove",action='store_true')
     parser.add_argument("--decoding_type", type = str, choices=['greedy','beam'])
     parser.add_argument("--temperature", type = float, default=1.)
-    parser.add_argument("--k",type=float,default=0.1)
+    parser.add_argument("--k",type=float,default=5)
     parser.add_argument('--fade_time',type=float,default=0.04)
-    parser.add_argument("--num_examples",type=int)
+    parser.add_argument("--num_examples",type=int, default=1)
+    parser.add_argument("--smaller",action='store_true')
     parser.add_argument("--data")
     parser.add_argument("--from_subset", action = 'store_true')
     parser.add_argument('--memory')
@@ -178,5 +179,6 @@ if __name__=='__main__':
             generate_example(model_ckp,args.memory,args.source,
                             args.with_coupling,args.remove,args.k,args.decoding_type, args.temperature,
                             args.fade_time,
-                            save_dir)
+                            save_dir,
+                            args.smaller)
         else : raise ValueError("Either specify 'data' or give a source and memory path")
