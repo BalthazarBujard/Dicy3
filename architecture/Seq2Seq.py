@@ -328,7 +328,8 @@ class Seq2SeqBase(nn.Module):
         #we dont need to update directlz the states after eos it can be done outside the transition_fn.
         #what matters is the generation of the padding mask to correctly generate representations with attention
         
-        logits = self.decision.decode(tgt_pe, memory, 
+        logits = self.decision.decode(tgt_pe, 
+                                      memory, 
                                       tgt_mask, 
                                       tgt_pad_mask=tgt_pad_mask,
                                       memory_pad_mask=memory_mask) # (B*beam_width,T,vocab_size) 
@@ -342,7 +343,6 @@ class Seq2SeqBase(nn.Module):
             
         return probs
     
-    #PROBLEM WITH THIS CUSTOM FUNCTION IS THAT IF THE MODEL IS WELL TRAINED, THEN WE WILL FAVORISE UNWANTED SEQUENCES OVERS VALID ONES
     def __beam_search_custom_fn(self,candidate:Candidate, entropy_weight : float):
         probs = torch.tensor(candidate.compute_prob())
         llh=torch.log(probs)/(candidate.effective_length**0.75)

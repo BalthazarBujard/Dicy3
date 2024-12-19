@@ -93,13 +93,14 @@ def build_quantizer(dim, vocab_size, learnable_codebook, restart)-> KmeansQuanti
     return vq
     
 
-def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None, chunking:str='pre') -> LocalEncoder:
-    encoder = LocalEncoder(backbone,quantizer,head_module,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
-    return encoder
+# def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None, chunking:str='pre') -> LocalEncoder:
+#     encoder = LocalEncoder(backbone,quantizer,head_module,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
+#     return encoder
 
 def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone : bool, dim : int, 
                        vocab_size : int, learnable_codebook : bool, restart_codebook : bool,
                        chunking : str, encoder_head : str, condense_type : str = None):
+    
     output_final_proj = dim==256 #if model dimension is 256 we want the final projection output, else 768 hidden layer output dim
     
     #load pretrained backbone
@@ -122,8 +123,7 @@ def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone
     #vector quantizer  
     vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook)
     
-    assert chunking in ['pre','post']
-    localEncoder=build_localEncoder(backbone, vq, encoder_head, condense_type,chunking)
+    localEncoder=LocalEncoder(backbone,vq,encoder_head,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
     
     return localEncoder
 
@@ -161,28 +161,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
                        diversity_weight=0.1):
     
     assert task.lower() in ["coupling","completion"]
-    
-    output_final_proj = dim==256 #if model dimension is 256 we want the final projection output, else 768 hidden layer output dim
-    
-    #load pretrained backbone
-    backbone=build_backbone(backbone_checkpoint,backbone_type,
-                            mean=False,pooling=False, 
-                            output_final_proj=output_final_proj,
-                            fw="fairseq") #no mean or pooling for backbone in seq2seq, collapse done in encoder
-    
-    if freeze_backbone:
-        backbone.eval() # SI ON UNFREEZE BB IL FAUT TRAIN VQ
-        backbone.freeze() #freeze backbone
-    
-    elif learnable_codebook == False:
-        raise ValueError("Train VQ if backbone in learning.")
-    
-    else : #trainable bb and codebook -> only freeze feature extractor (CNN)
-        backbone.freeze_feature_extractor()
-       
-    
-    #vector quantizer  
-    vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook)
+    assert chunking in ['pre','post']
     
     """
     ema_update =  not learnable_codebook
@@ -206,8 +185,10 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
                          kmeans_init=kmeans_init,
                          threshold_ema_dead_code=threshold_ema_dead_code)
     """
-    assert chunking in ['pre','post']
-    localEncoder=build_localEncoder(backbone, vq, encoder_head, condense_type,chunking)
+    
+    localEncoder=build_localEncoder(backbone_checkpoint,backbone_type, freeze_backbone, dim,
+                                    vocab_size, learnable_codebook, restart_codebook, chunking,
+                                    encoder_head, condense_type)
         
     decision_module = build_decision(localEncoder.dim,transformer_layers,
                                      vocab_size=vocab_size+3*use_special_tokens, #+ pad, sos, eos

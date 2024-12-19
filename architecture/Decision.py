@@ -53,7 +53,7 @@ class Decision(nn.Module):
         
         return memory
     
-    def decode(self,tgt,memory,tgt_mask=None,memory_mask=None,tgt_pad_mask=None,memory_pad_mask=None):
+    def decode(self,tgt,memory,tgt_mask=None,memory_mask=None,tgt_pad_mask=None,memory_pad_mask=None) -> torch.Tensor:
         if not self.decoder_only:
             out = self.decision.decoder(tgt,memory,tgt_mask=tgt_mask,memory_mask=memory_mask,tgt_key_padding_mask=tgt_pad_mask,memory_key_padding_mask=memory_pad_mask)
         else : out = self.decision(tgt,memory,tgt_mask=tgt_mask,memory_mask=memory_mask,tgt_key_padding_mask=tgt_pad_mask,memory_key_padding_mask=memory_pad_mask)
