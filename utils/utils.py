@@ -171,7 +171,7 @@ def topK_search(k, logits,targets=None):
     if targets != None :
         #find the corresct value in the topK
         #if there isnt then random choice
-        sampled_idx=torch.empty(B, dtype=torch.long) # init empty tenosr
+        sampled_idx=torch.empty(B, dtype=torch.long, device = logits.device) # init empty tenosr
         for i,(topK_sample,tgt) in enumerate(zip(topK_idx,targets)):
             
             if tgt in topK_sample:

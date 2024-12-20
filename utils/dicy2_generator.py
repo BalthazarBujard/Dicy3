@@ -40,7 +40,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     memory_fetcher.device=model.device
     
     #generate the whole corpus data from memory chunks
-    memory = []
+    labels = []
     corpus_data=[]
     all_memory_chunks = []
     last_slice=0
@@ -60,6 +60,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
                 memory_idx = memory_idx[:,-hop_size:] #take last hop_size bit
                 memory_data.slices = memory_data.slices[:,-hop_size:] """
                 
+        labels.append(memory_idx[0].numpy(force=True))
         
         #corpus = memory as [(label, content)] where label is codebook index from encoding and content is the slice index
         corpus_data.extend([(label.item(), content.item()+last_slice) for label,content in zip(memory_idx[0],memory_data.slices[0])])
@@ -82,13 +83,15 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     prospector = FactorOracleProspector(corpus, label_type, max_continuity=max_continuity)
     generator = Dicy2Generator(prospector, force_output=force_output)
     print("Corpus (= GT):\n",[label for label,_ in corpus_data])
-    return memory_chunks, generator
+    return memory_chunks, generator, labels
+
 
 def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                       chunk_segmentation : str, 
                       with_coupling : bool, k : int, decoding_type : str,
                       generator : Dicy2Generator,
-                      temperature : float):
+                      temperature : float,
+                      tgt_gts : list[list] = None):
 
     label_type = ListLabel
     
@@ -98,7 +101,8 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
     src_fetcher=Fetcher(src_loader)
     src_fetcher.device=model.device
     
-    eos=model.special_tokens_idx['eos'].item()
+    eos=model.special_tokens_idx['eos']
+    sos = model.special_tokens_idx["sos"]
     
     queries = [] #slice indexes
     searches_for = [] #classes
@@ -112,20 +116,32 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         encoded_src, src_idx, src_pad_mask = model.encode(src_data.src, src_data.src_padding_masks) 
         
         if with_coupling: #if we want to generate a more complex response 
+            
+            if tgt_gts != None :
+                tgt_gt = torch.tensor(tgt_gts[i],device = model.device)
+                tgt_gt = torch.cat([torch.tensor([sos],device=model.device),
+                                    tgt_gt,
+                                    torch.tensor([eos],device=model.device)],dim=0)
+            else : tgt_gt = None
+            
             _,tgt_idx = model.coupling(encoded_src, 
                                        src_pad_mask, 
                                        k, 
                                        max_len=len(encoded_src[0]),
                                        decoding_type=decoding_type,
-                                       temperature=temperature)
+                                       temperature=temperature,
+                                       tgt_gt=tgt_gt)
+            
+            print("pred :",tgt_idx)
+            print("GT:",tgt_gt)
         
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
         
         search_for = np.array([label.item()  for label in tgt_idx[0][1:]]) #dont take sos
 
         #crop response to eos if early stop
-        if any(search_for==eos):
-            search_for = search_for[:np.where(search_for==eos)[0][0]]
+        if any(search_for==eos.item()):
+            search_for = search_for[:np.where(search_for==eos.item())[0][0]]
         
         #with some models that collapsed there is only the eos token predicted and that riases error by influenceQuery
         if len(search_for)==0 :
@@ -211,7 +227,7 @@ def concatenate_response(memory:np.ndarray, memory_chunks:np.ndarray, queries:np
 #TODO : USE SLIDING WINDOW TO GENERATE NEW CHUNKS LABELS WITH SOME CONTEXT
 @torch.no_grad()
 def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2SeqBase,str],
-                      k:int, with_coupling : bool, decoding_type : str, temperature : float,
+                      k:int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool,
                       max_track_duration:float,max_chunk_duration:float,
                       track_segmentation:str, chunk_segmentation:str,
                       concat_fade_time=0.04, remove=False, max_backtrack = None,
@@ -250,12 +266,13 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     
     
     prYellow("Generating memory corpus...")
-    memory_chunks, generator = generate_memory_corpus(memory_ds,model,chunk_segmentation)
+    memory_chunks, generator, labels = generate_memory_corpus(memory_ds,model,chunk_segmentation)
     memory = memory_ds.native_track
     
     
     prYellow("Generating reponse...")
-    queries, searches_for = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, temperature)
+    tgt_gts = labels if force_coupling else None
+    queries, searches_for = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, temperature,tgt_gts)
     source = src_ds.native_track
 
     prYellow("Concatenate response...")

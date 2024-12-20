@@ -239,9 +239,18 @@ class Seq2SeqBase(nn.Module):
         
         return embeddings
     
-    def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:int, max_len : int):
-        
+    def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:int, max_len : int,
+                         tgt_gt : torch.Tensor = None):    
+            
         B = memory.size(0)
+        
+        if tgt_gt != None: 
+            if tgt_gt.ndim < 2 : #1D tensor
+                #expand batch dimension
+                tgt_gt = tgt_gt.view(1,-1).repeat(B,1)
+            
+            assert tgt_gt.shape[1]>=max_len, "If tgt_out is specified, it should be at least as long as max_len" 
+        
         
         #init tgt as SOS
         tgt = self.special_token_embeddings(self.sos).unsqueeze(0).expand(B,1,-1) #(B,1,D)
@@ -267,9 +276,10 @@ class Seq2SeqBase(nn.Module):
                                           tgt_pad_mask=tgt_pad_mask,
                                           memory_pad_mask=memory_pad_mask)[:,-1:,:] #(B,1,vocab_size) only take last step
                         
-            #top-K random prediction
-            next_token_idx = predict_topK(k,logits).reshape(logits.shape[:-1])[:,-1]  #(B,)
-            
+            #top-K prediction
+            tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None 
+            next_token_idx = predict_topK(k,logits,tgt_token).reshape(logits.shape[:-1])[:,-1]  #(B,)
+
             #next_token : (B,D)
             next_token = self.from_indexes_to_embeddings(next_token_idx)
             
@@ -376,17 +386,18 @@ class Seq2SeqBase(nn.Module):
 
     
     def decode(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor,
-               k:int, max_len : int, decoding_type : str, temperature : float = 1) -> Tuple[torch.Tensor, torch.Tensor]:
+               k:int, max_len : int, decoding_type : str, temperature : float = 1,
+               tgt_gt : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         
         if decoding_type == "greedy":
-            tgt, tgt_idx = self._greedy_decoding(memory, memory_pad_mask, k, max_len)
+            tgt_out, tgt_idx = self._greedy_decoding(memory, memory_pad_mask, k, max_len, tgt_gt)
             
         elif decoding_type=="beam":
-            tgt, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, temperature)
+            tgt_out, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, temperature)
         
         else : raise ValueError(f"Wrong 'decoding_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
         
-        return tgt, tgt_idx
+        return tgt_out, tgt_idx
         
     
     
@@ -468,7 +479,8 @@ class Seq2SeqCoupling(Seq2SeqBase):
     #generate sequence of labels to "couple" the input sequence of labels (memory)
     @torch.no_grad
     def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
-                 k:int, max_len : int, decoding_type : str, temperature : float): 
+                 k:int, max_len : int, decoding_type : str, temperature : float, 
+                 tgt_gt : torch.Tensor = None): 
         
         src = encoded_src
         
@@ -477,7 +489,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         memory = self.decision.encode(src,src_mask=None,src_pad_mask=src_pad_mask) #encode src once -> pass through Transformer encoder if enc-dec else will be = src
         
-        tgt, tgt_idx = self.decode(memory, src_pad_mask, k, max_len, decoding_type, temperature)
+        tgt, tgt_idx = self.decode(memory, src_pad_mask, k, max_len, decoding_type, temperature, tgt_gt)
         
         return tgt, tgt_idx 
     
