@@ -317,6 +317,8 @@ class Seq2SeqTrainer(nn.Module):
                 d=np.load(f"/data3/ansynth_nonbp/bujard/DICY2/runs/coupling/eval_{self.trainer_name}.npy",allow_pickle=True)
                 train_losses=d['train_loss']
                 val_losses=d['test_loss']
+                train_accs = d['train_acc']
+                val_accs = d['test_acc']
             except:
                 pass
         

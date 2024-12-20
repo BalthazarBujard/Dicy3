@@ -926,7 +926,7 @@ class Fetcher:
         self.loader=loader
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    def _fetch_inputs(self):
+    def _fetch_inputs(self)-> Union[torch.Tensor, dict]:
         #method to fetch next set of inputs
         try:
             #try to fectch next inputs

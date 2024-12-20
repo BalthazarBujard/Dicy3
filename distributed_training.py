@@ -171,9 +171,12 @@ def main(rank, world_size, args):
                                         SAMPLING_RATE=SAMPLING_RATE,
                                         direction=DIRECTION,distributed=True)
     val_fetcher.device = rank
+    
+    run_id = args.run_id
 
     if args.resume_ckp!='':
         seq2seq, params, optim_state_dict = load_model_checkpoint(args.resume_ckp)
+        run_id = params['run_id']
     
     else : seq2seq=build_model(args)
     
@@ -218,7 +221,7 @@ def main(rank, world_size, args):
         
         else : optimizer.load_state_dict(optim_state_dict)
     
-    run_id = args.run_id
+    
     
     #weighed crossentropy
     weighed = args.weighed_crossentropy

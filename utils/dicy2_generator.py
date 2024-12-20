@@ -31,7 +31,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     
     #dicy2 args
     max_continuity: int = 10000  # longest continuous sequence of the original text that is allowed before a jump is forced
-    force_output: bool = True  # if no matches are found: output the next event (if True) or output None (if False)
+    force_output: bool = False #True  # if no matches are found: output the next event (if True) or output None (if False)
     label_type = ListLabel
     
     collate_fn = MusicDataCollator(with_slices=True,unifrom_chunks=chunk_segmentation!="onset")
@@ -140,7 +140,8 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         output = generator.process_query(query)
         
         #memory slices index to retrieve
-        slices=[typing.cast(Dicy2CorpusEvent, v.event).data if v is not None else None for v in output]
+        slices=[typing.cast(Dicy2CorpusEvent, v.event).data if v is not None else -1 for v in output]
+        print("chunk slices :",slices)        
         
         #add silences to match input length
         if len(slices)<len(src_data.src[0]) :
