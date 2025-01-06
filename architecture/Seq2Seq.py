@@ -246,6 +246,7 @@ class Seq2SeqBase(nn.Module):
         
         if tgt_gt != None: 
             if tgt_gt.ndim < 2 : #1D tensor
+                print("Expanding tgt_gt dim to match batch size")
                 #expand batch dimension
                 tgt_gt = tgt_gt.view(1,-1).repeat(B,1)
             
@@ -277,7 +278,7 @@ class Seq2SeqBase(nn.Module):
                                           memory_pad_mask=memory_pad_mask)[:,-1:,:] #(B,1,vocab_size) only take last step
                         
             #top-K prediction
-            tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None 
+            tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None #(B,1)
             next_token_idx = predict_topK(k,logits,tgt_token).reshape(logits.shape[:-1])[:,-1]  #(B,)
 
             #next_token : (B,D)
@@ -448,6 +449,11 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         #apply source masking
         if self.has_masking:
+            #take sos and eos into account
+            mask_time_indices = torch.cat([torch.tensor([False],device=self.device).expand(src.size(0),1),
+                                           mask_time_indices,
+                                           torch.tensor([False],device=self.device).expand(src.size(0),1)],dim=1)
+            
             src[mask_time_indices]=self.spec_mask_embed
             
             T = src.size(1) if not self.decision.decoder_only else tgt_input.size(1) #self attention if decoder only and cross atention for decodr only

@@ -58,6 +58,8 @@ def build_model(args):
     inner_dim=args.inner_dim
     heads=args.heads
     dropout = args.dropout
+    
+    has_masking = args.has_masking
 
     seq2seq=SimpleSeq2SeqModel(pretrained_bb_checkpoint,
                                     bb_type,
@@ -69,6 +71,7 @@ def build_model(args):
                                     use_special_tokens=use_special_tokens,
                                     task=task,
                                     condense_type=condense_type,
+                                    has_masking=has_masking,
                                     freeze_backbone=freeze_backbone,
                                     learnable_codebook=learnable_codebook,
                                     restart_codebook=restart_codebook,
@@ -163,7 +166,7 @@ def main(rank, world_size, args):
                                         distributed=True)
     train_fetcher.device = rank
     
-    #QUESTION : IF MASKING, APPLY MASK TO VAL DATASET ?
+    #QUESTION : IF MASKING, APPLY MASK TO VAL DATASET ? --> no ! mask only for training, during eval we use the whole seuqnece
     val_fetcher = build_coupling_ds(val_roots,batch_size,
                                         MAX_TRACK_DURATION,MAX_CHUNK_DURATION,
                                         segmentation_strategy=SEGMENTATION_STRATEGY,

@@ -27,7 +27,7 @@ from gig.main.corpus import GenericCorpus # type: ignore
 from gig.main.influence import LabelInfluence # type: ignore
 from gig.main.query import InfluenceQuery # type: ignore
 
-def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoupling, chunk_segmentation : str):
+def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoupling, chunk_segmentation : str, batch_size : int):
     
     #dicy2 args
     max_continuity: int = 10000  # longest continuous sequence of the original text that is allowed before a jump is forced
@@ -35,7 +35,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     label_type = ListLabel
     
     collate_fn = MusicDataCollator(with_slices=True,unifrom_chunks=chunk_segmentation!="onset")
-    memory_loader = DataLoader(memory_ds,1,False,collate_fn=collate_fn)
+    memory_loader = DataLoader(memory_ds,batch_size,False,collate_fn=collate_fn)
     memory_fetcher = Fetcher(memory_loader)
     memory_fetcher.device=model.device
     
@@ -44,6 +44,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     corpus_data=[]
     all_memory_chunks = []
     last_slice=0
+    native_chunk_idx = 0
     
     #IT WONT WORK LIKE THIS DUE TO THE SUBSAMPLING !!! COULD USE HOP RATIO ON OUTPUT LENGTH BUT CHECK IF IT WORKS !!
     """ if track_segmentation=='sliding':
@@ -59,19 +60,22 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
             if i != 0: #if first segment there is no context -> take all
                 memory_idx = memory_idx[:,-hop_size:] #take last hop_size bit
                 memory_data.slices = memory_data.slices[:,-hop_size:] """
-                
-        labels.append(memory_idx[0].numpy(force=True))
         
         #corpus = memory as [(label, content)] where label is codebook index from encoding and content is the slice index
-        corpus_data.extend([(label.item(), content.item()+last_slice) for label,content in zip(memory_idx[0],memory_data.slices[0])])
-        last_slice = corpus_data[-1][1]+1 #slices only go from 0 to max so we need to update the real slice index basded on ietration
         
-        #retrieve corresponding memory chunks
-        memory_chunks=memory_ds.get_native_chunks(i) #unprocessed chunks with native sr
-        all_memory_chunks.extend(memory_chunks) #append to list of all chunks
+        #TODO : OPTIMIZE THIS CODE PART
+        for idxs, slices in zip(memory_idx,memory_data.slices):
+            print(idxs,slices)
+            corpus_data.extend([(label.item(), last_slice+content.item()) for label,content in zip(idxs,slices)])
+            last_slice = corpus_data[-1][1]+1 #slices only go from 0 to max so we need to update the real slice index basded on ietration
         
-        #append to memory
-        #memory.extend(np.concatenate(memory_chunks))
+            #retrieve corresponding memory chunks
+            memory_chunks=memory_ds.get_native_chunks(native_chunk_idx) #unprocessed chunks with native sr
+            all_memory_chunks.extend(memory_chunks) #append to list of all chunks
+            
+            native_chunk_idx+=1
+        
+        labels.append(memory_idx.numpy(force=True))
     
     memory_chunks = all_memory_chunks #rename for simplicity
     #memory = np.concatenate(memory_chunks)
@@ -91,13 +95,13 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                       with_coupling : bool, k : int, decoding_type : str,
                       generator : Dicy2Generator,
                       temperature : float,
+                      batch_size : int,
                       tgt_gts : list[list] = None):
 
     label_type = ListLabel
     
     collate_fn = MusicDataCollator(with_slices=True,unifrom_chunks=chunk_segmentation!="onset")
-
-    src_loader = DataLoader(src_ds,1,False,collate_fn=collate_fn)
+    src_loader = DataLoader(src_ds,batch_size,False,collate_fn=collate_fn)
     src_fetcher=Fetcher(src_loader)
     src_fetcher.device=model.device
     
@@ -118,10 +122,10 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         if with_coupling: #if we want to generate a more complex response 
             
             if tgt_gts != None :
-                tgt_gt = torch.tensor(tgt_gts[i],device = model.device)
-                tgt_gt = torch.cat([torch.tensor([sos],device=model.device),
+                tgt_gt = torch.tensor(tgt_gts[i],device = model.device) #(B,T)
+                tgt_gt = torch.cat([torch.tensor([sos],device=model.device).expand(tgt_gt.size(0),1),
                                     tgt_gt,
-                                    torch.tensor([eos],device=model.device)],dim=0)
+                                    torch.tensor([eos],device=model.device).expand(tgt_gt.size(0),1)],dim=1)
             else : tgt_gt = None
             
             _,tgt_idx = model.coupling(encoded_src, 
@@ -132,38 +136,43 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                                        temperature=temperature,
                                        tgt_gt=tgt_gt)
             
-            print("pred :",tgt_idx)
-            print("GT:",tgt_gt)
+            #print("pred :",tgt_idx)
+            #print("GT:",tgt_gt)
         
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
         
-        search_for = np.array([label.item()  for label in tgt_idx[0][1:]]) #dont take sos
+        for idxs in tgt_idx:
+            search_for = np.array([label.item()  for label in idxs[1:]]) #dont take sos
 
-        #crop response to eos if early stop
-        if any(search_for==eos.item()):
-            search_for = search_for[:np.where(search_for==eos.item())[0][0]]
-        
-        #with some models that collapsed there is only the eos token predicted and that riases error by influenceQuery
-        if len(search_for)==0 :
-            queries.extend([-1]*len(src_data.src[0])) #append as many silences as input chunks
-            searches_for.extend([None]*len(src_data.src[0]))
-            continue
-        
-        searches_for.extend(search_for)
+            #crop response to eos if early stop
+            if any(search_for==eos.item()):
+                search_for = search_for[:np.where(search_for==eos.item())[0][0]]
+            
+            #with some models that collapsed there is only the eos token predicted and that riases error by influenceQuery
+            if len(search_for)==0 :
+                if chunk_segmentation=='onset': raise NotImplementedError("Silence handling not implemented for onset segmentation")
+                
+                queries.extend([-1]*len(src_data.src[0])) #append as many silences as input chunks
+                searches_for.extend([None]*len(src_data.src[0]))
+                continue
+            
+            searches_for.extend(search_for)
 
-        query = InfluenceQuery([LabelInfluence(label_type([v])) for v in search_for])
+            query = InfluenceQuery([LabelInfluence(label_type([v])) for v in search_for])
 
-        output = generator.process_query(query)
-        
-        #memory slices index to retrieve
-        slices=[typing.cast(Dicy2CorpusEvent, v.event).data if v is not None else -1 for v in output]
-        print("chunk slices :",slices)        
-        
-        #add silences to match input length
-        if len(slices)<len(src_data.src[0]) :
-            slices.extend([-1]*(len(src_data.src[0])-len(slices))) 
-        
-        queries.extend(slices)
+            output = generator.process_query(query)
+            
+            #memory slices index to retrieve
+            slices=[typing.cast(Dicy2CorpusEvent, v.event).data if v is not None else -1 for v in output]
+            #print("chunk slices :",slices)        
+            
+            #add silences to match input length
+            if len(slices)<len(src_data.src[0]) :
+                if chunk_segmentation=='onset': raise NotImplementedError("Silence handling not implemented for onset segmentation")
+                    
+                slices.extend([-1]*(len(src_data.src[0])-len(slices))) 
+            
+            queries.extend(slices)
     
     return queries, searches_for
 
@@ -230,6 +239,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                       k:int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool,
                       max_track_duration:float,max_chunk_duration:float,
                       track_segmentation:str, chunk_segmentation:str,
+                      batch_size : int = 1,
                       concat_fade_time=0.04, remove=False, max_backtrack = None,
                       device=None,
                       sampling_rate=16000, tgt_sampling_rates : dict = {'solo':None,'mix':None},
@@ -266,13 +276,13 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     
     
     prYellow("Generating memory corpus...")
-    memory_chunks, generator, labels = generate_memory_corpus(memory_ds,model,chunk_segmentation)
+    memory_chunks, generator, labels = generate_memory_corpus(memory_ds,model,chunk_segmentation,batch_size)
     memory = memory_ds.native_track
     
     
     prYellow("Generating reponse...")
     tgt_gts = labels if force_coupling else None
-    queries, searches_for = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, temperature,tgt_gts)
+    queries, searches_for = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, temperature, batch_size, tgt_gts)
     source = src_ds.native_track
 
     prYellow("Concatenate response...")

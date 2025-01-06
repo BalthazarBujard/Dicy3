@@ -11,7 +11,7 @@ import argparse
 from librosa import load
 
 
-def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temperature, force_coupling, fade_time, num_examples, data, save_dir, from_subset=False):
+def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temperature, force_coupling, fade_time, num_examples, data, save_dir, batch_size, from_subset=False):
     model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -71,6 +71,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
                             MAX_TRACK_DURATION,MAX_CHUNK_DURATION,
                             track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
+                            batch_size=batch_size,
                             concat_fade_time=fade_time,
                             remove=remove,
                             save_dir=save_dir,
@@ -95,12 +96,13 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
             output = generate(memory,src,model,k,with_coupling, decoding_type, temperature, force_coupling,
                             MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
+                            batch_size=batch_size,
                             concat_fade_time=fade_time,
                             remove=remove,
                             save_dir=save_dir,
                             device=DEVICE)
             
-def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, force_coupling, fade_time,save_dir,smaller,max_duration=60.):
+def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, force_coupling, fade_time,save_dir,smaller, batch_size,max_duration=60.):
     model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -124,6 +126,7 @@ def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type,
     output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
                       MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
                             chunk_segmentation=SEGMENTATION_STRATEGY,
+                            batch_size=batch_size,
                             concat_fade_time=fade_time,
                             remove=remove, timestamps=timestamps,
                             save_dir=save_dir,
@@ -136,6 +139,7 @@ if __name__=='__main__':
     #ckp = "runs/coupling/All_res0.5s_len30.0s_mix2stem_8.pt"
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_ckp",type=str)
+    parser.add_argument("--batch_size",type=int,default=1)
     parser.add_argument("--ckp_file",type=str,help="Path to file containing the list of model checkpoints to generate with")
     """ parser.add_argument('-cd',"--chunk_duration",type=float)
     parser.add_argument('-td',"--track_duration",type=float) """
@@ -176,12 +180,15 @@ if __name__=='__main__':
             generate_examples(model_ckp,with_coupling,args.remove,
                             args.k, args.decoding_type, args.temperature, args.force_coupling,
                             fade_time=args.fade_time,
-                            num_examples=args.num_examples,data=args.data,save_dir=save_dir,from_subset=args.from_subset)
+                            num_examples=args.num_examples,data=args.data,save_dir=save_dir, 
+                            batch_size=args.batch_size,
+                            from_subset=args.from_subset)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model_ckp,args.memory,args.source,
                             args.with_coupling,args.remove,args.k,args.decoding_type, args.temperature, args.force_coupling,
                             args.fade_time,
                             save_dir,
-                            args.smaller)
+                            args.smaller,
+                            args.batch_size)
         else : raise ValueError("Either specify 'data' or give a source and memory path")

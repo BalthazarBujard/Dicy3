@@ -159,12 +159,15 @@ class Seq2SeqTrainer(nn.Module):
             src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices = inputs.values()
             #compute output
             logits, tgt, tgt_idx, codebook_loss = self.model(src, tgt, src_pad_mask, tgt_pad_mask,
-                                                        sample_codebook_temp=self.codebook_sample_temperature)
+                                                        sample_codebook_temp=self.codebook_sample_temperature,
+                                                        mask_time_indices = src_mask_indices)
             
         elif type(model)==Seq2SeqBase: #for autocompletion
             src, src_pad_mask, src_mask_indices, label = inputs.values() 
             #compute output
-            logits, tgt, tgt_idx, codebook_loss = self.model(src, src_pad_mask, sample_codebook_temp=self.codebook_sample_temperature)
+            logits, tgt, tgt_idx, codebook_loss = self.model(src, src_pad_mask, 
+                                                             sample_codebook_temp=self.codebook_sample_temperature,
+                                                             mask_time_indices = src_mask_indices)
             
         return logits,tgt,tgt_idx,codebook_loss
 
