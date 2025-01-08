@@ -44,7 +44,7 @@ def main():
     parser.add_argument('-reg_alpha',type=float,default=0.)
     parser.add_argument('-grad_accum',type=int,default=1)
     parser.add_argument('-weighed','--weighed_crossentropy',action='store_true')
-    parser.add_argument('-k',type=int,default=5)
+    parser.add_argument('-k',type=float,default=5)
     parser.add_argument('-data',type = str, choices=['canonne','moises','all'])
     parser.add_argument("--train_subset",action="store_true")
     parser.add_argument("--run_id",type=str)
@@ -227,6 +227,7 @@ def main():
 
     #----------top-K parameter---------------
     k = args.k
+    if k>1 : k=int(k)
     
     #weighed crossentropy
     weighed = args.weighed_crossentropy

@@ -22,9 +22,11 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
     SEGMENTATION_STRATEGY = model.segmentation
     PRE_SEGMENTATION_STARTEGY="uniform"
     
-    if k<1 :
-        k=int(k*params['vocab_size'])
-    else : k=int(k)
+    if k>1:
+        k=int(k)
+    #if k<1 :
+    #    k=int(k*params['vocab_size'])
+    #else : k=int(k)
     
     val_folder = "val_subset" if from_subset else "val"
     
@@ -113,9 +115,11 @@ def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type,
     SEGMENTATION_STRATEGY = model.segmentation
     PRE_SEGMENTATION_STARTEGY="uniform"
     
-    if k<1 :
-        k=int(k*params['vocab_size'])
-    else : k=int(k)
+    if k>=1:
+        k=int(k)
+    #if k<1 :
+    #    k=int(k*params['vocab_size'])
+    #else : k=int(k)
     
     if smaller: #find small chunk in track
         y,sr = load(src[np.random.randint(0,len(src))],sr=None)

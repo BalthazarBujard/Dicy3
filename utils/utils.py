@@ -1,10 +1,12 @@
 
+#%%
 import torch
 import numpy as np
 from librosa import time_to_frames,frames_to_time
 from librosa.onset import onset_backtrack, onset_detect
-from essentia.standard import Windowing,FFT,CartesianToPolar,FrameGenerator,Onsets,OnsetDetection
-import essentia 
+from typing import Optional
+#from essentia.standard import Windowing,FFT,CartesianToPolar,FrameGenerator,Onsets,OnsetDetection
+#import essentia 
 
 #utilitary functions
 def prGreen(skk): print("\033[92m {}\033[00m" .format(skk)) #function to print in green color in terminal
@@ -156,17 +158,16 @@ def load_trained_backbone_from_classifier(pretrained_file, backbone_checkpoint="
         
     return adapted_model, classifier
 
-
-def topK_search(k, logits,targets=None):
+def random_sample(topK_idx : torch.Tensor):
+    N,k = topK_idx.size()
+    random_idx = torch.randint(0,k,size=(N,1),device=topK_idx.device)
+    sampled_idx = torch.gather(topK_idx, 1, random_idx).squeeze(1)
+    
+    return sampled_idx
+#%%
+def topK_search(k, logits : torch.Tensor, targets : Optional[torch.Tensor]=None):
     B,C = logits.size()
     topK_idx = torch.topk(logits,k,dim=-1)[1] #(B,k)
-    
-    def random_sample(topK_idx):
-        N,k = topK_idx.size()
-        random_idx = torch.randint(0,k,size=(N,1),device=logits.device)
-        sampled_idx = torch.gather(topK_idx, 1, random_idx).squeeze(1)
-        
-        return sampled_idx
     
     if targets != None :
         #find the corresct value in the topK
@@ -187,10 +188,63 @@ def topK_search(k, logits,targets=None):
     
     return sampled_idx
 
-def predict_topK(k,logits,tgt=None):
-    logits_rs = logits.reshape(-1,logits.size(-1))
-    tgts_rs = tgt.reshape(-1) if tgt!=None else None
-    preds = topK_search(k,logits_rs,tgts_rs)
+def topP_search(p: float, logits : torch.Tensor, targets : Optional[torch.Tensor]=None):
+    if not 0<=p<=1 :
+        raise ValueError("p value should be between 0 and 1.")
+    
+    probs = torch.softmax(logits,dim=-1) #(B,vocab)
+    sorted_probs, indices = torch.sort(probs,descending=True)
+    #print(indices)
+    probs_cumsum = torch.cumsum(sorted_probs,dim=-1) #(B,vocab)
+    
+    close_to_top_p = torch.isclose(probs_cumsum, torch.tensor(p, device=probs_cumsum.device), atol=1e-6)
+    
+    condition = (probs_cumsum<=p)|close_to_top_p
+    
+    #if no element satisfies the topP value, return the elem with highest prob
+    condition[:,0] = torch.where(condition[:,0]==False,True,condition[:,0])
+    #print(condition)
+    
+    top_p_indices = torch.argwhere(condition)
+    #print(top_p_indices)
+    
+    change = torch.where(torch.diff(top_p_indices[:,0]))[0]+1
+    change = torch.cat([torch.tensor([0],device=logits.device),change,torch.tensor([len(top_p_indices)],device=logits.device)])
+    
+    top_p_indices = [top_p_indices[start:stop,1] for start, stop in zip(change[:-1],change[1:])] #(B,inhomogenous)
+    #print(top_p_indices)
+    
+    #assign topP indices, if no elemnt satisfies p value -> return first
+    topP_idx = [indices[i,:idxs[-1]+1] for i,idxs in enumerate(top_p_indices)] #(B,inhomogenous)
+    
+    if targets != None :
+        #find the corresct value in the topK
+        #if there isnt then random choice
+        sampled_idx=torch.empty(len(topP_idx), dtype=torch.long, device = logits.device) # init empty tenosr
+        for i,(topP_sample,tgt) in enumerate(zip(topP_idx,targets)):
+            
+            if tgt in topP_sample:
+                sampled_idx[i]=tgt
+            
+            else :
+                #random sample from that list
+                sampled_idx[i] = random_sample(topP_sample.unsqueeze(0)) #fct expects (N,k)-->(1,k)
+    
+    else :
+        #return random sample among those values
+        sampled_idx = torch.tensor([random_sample(topP_sample.unsqueeze(0)) for topP_sample in topP_idx], device=logits.device)
+    
+    return sampled_idx
+#%%
+
+def predict_topK_P(k,logits : torch.Tensor, tgt : Optional[torch.Tensor]=None):
+    logits_rs = logits.reshape(-1,logits.size(-1)) #(B*T,vocab)
+    tgts_rs = tgt.reshape(-1) if tgt!=None else None #(B*T)
+    if k>=1:
+        preds = topK_search(k,logits_rs,tgts_rs)
+    else :
+        preds = topP_search(k,logits_rs, tgts_rs)
+        
     return preds
 
 def build_coupling_ds(roots, BATCH_SIZE, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
@@ -370,3 +424,5 @@ def detect_onsets(audio, sr,with_backtrack):
         
         return onsets, backtrack
     return onsets
+
+# %%

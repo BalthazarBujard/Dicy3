@@ -11,7 +11,7 @@ def train_parser():
     parser.add_argument('-td','--track_duration', type = float, default=15.)
     parser.add_argument('-seg',"--segmentation", type=str, default="uniform")
     parser.add_argument('-p_seg',"--pre_segmentation", type=str, default="sliding")
-    parser.add_argument('--pre_post_chunking',type = str, choices=['pre','post'])
+    parser.add_argument('--pre_post_chunking',type = str, choices=['pre','post'], default = 'post')
     parser.add_argument('-dir','--direction',type=str,choices=["stem","mix"],default="stem")
     parser.add_argument('--dim', type = int, choices=[256,768], default=768)
     #parser.add_argument('--ignore',type=list,nargs='*',default=["drums", "percussions", "other"]) #problem passing this arg
@@ -19,6 +19,7 @@ def train_parser():
     #prRed("TRAINIGN BACKBONE")
     parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],required=True)
     parser.add_argument('--learnable_cb',action='store_true')
+    parser.add_argument('-restart','--restart_codebook',action='store_true')
     parser.add_argument('--codebook_loss_weight',type=float,default=0.25) #++ encoding et embeddings vont se rapprocher vite -> risque de collapse
     parser.add_argument('-head','--encoder_head',type=str,choices=['mean','attention'],default='mean')
     parser.add_argument('-condense','--condense_type',choices=['mask','weighed','none'],default='none')
@@ -40,11 +41,10 @@ def train_parser():
     parser.add_argument('--reg_alpha',type=float,default=0.) # ++ -> probs seront uniforme : compromis entre variete et confidence
     parser.add_argument('--grad_accum',type=int,default=1)
     parser.add_argument('--weighed_crossentropy',action='store_true')
-    parser.add_argument('--k',type=float,default=0.1)
+    parser.add_argument('--k',type=float,default=5)
     parser.add_argument('--run_id',type=str)
     parser.add_argument('--train_subset',action='store_true') #to do small trainings to find good parameters
     parser.add_argument('--data',choices=['all','canonne','moises'])
-    parser.add_argument('-restart','--restart_codebook',action='store_true')
     parser.add_argument('--resume_ckp',default='')
     parser.add_argument('--resume_epoch',type=int,default=0)
     

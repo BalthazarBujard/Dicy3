@@ -7,7 +7,7 @@ from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from architecture.Model import load_model_checkpoint
 from MusicDataset.MusicDataset_v2 import Fetcher
 from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality
-from utils.utils import predict_topK,prGreen,build_coupling_ds, extract_memory_path,prYellow, find_non_empty
+from utils.utils import predict_topK_P,prGreen,build_coupling_ds, extract_memory_path,prYellow, find_non_empty
 from utils.coupling_ds_generator import extract_all_groups
 from top_k_validity import compute_similarity
 from tqdm import tqdm
@@ -89,7 +89,7 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
             tgt_out = tgt_idx[:,1:] #ground truth
             
             #topK search
-            preds = predict_topK(k,logits,tgt_out)
+            preds = predict_topK_P(k,logits,tgt_out)
             
             #accuracy with topK
             accs.append(compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=model.special_tokens_idx["pad"]))
@@ -170,13 +170,13 @@ def parse_args():
     parser.add_argument('--model_ckp',nargs='*')
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
     parser.add_argument("--split", choices = ['val','subset_val','test'])
-    parser.add_argument('--k',type=float, default=0.1)
+    parser.add_argument('--k',type=float, default=5)
     #if already generated audio samples
     parser.add_argument("--generate",action='store_true')
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--max_duration",type=float,default=60)
     parser.add_argument("--smaller",action='store_true')
-    parser.add_argument("--crossfade_time",type=float,default=0.2)
+    parser.add_argument("--crossfade_time",type=float,default=0.04)
     parser.add_argument("--quality_tgt_folder",default=None, help="target folder to generated samples to evaluate audio quality of the model") 
     parser.add_argument("--apa_tgt_folder",default=None, help="target folder to generated to evaluate apa")
     parser.add_argument("--similarity_tgt_folder",default=None, help="target folder to evaluate music similarity")
@@ -211,7 +211,6 @@ def main():
     task = args.task
     #model_ckp = args.model_ckp
     
-    k=int(args.k)
     
     for model_ckp in model_ckps:
         prYellow(os.path.basename(model_ckp))        
@@ -240,8 +239,8 @@ def main():
             chunk_duration = params['chunk_size']
             segmentation_strategy = params['segmentation']
             
-            if args.k<1: #portion of vocab size
-                k = int(args.k*params['vocab_size'])
+            if args.k>=1: #portion of vocab size
+                k = int(k)
         
         
         path=os.path.abspath(__file__)

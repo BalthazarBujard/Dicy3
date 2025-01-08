@@ -5,7 +5,7 @@ from .Decision import Decision
 from typing import Union,Tuple
 import math
 import time
-from utils.utils import predict_topK
+from utils.utils import predict_topK_P
 from beam_search import BeamSearch, Candidate
 from typing import List
 from scipy.stats import entropy
@@ -239,7 +239,7 @@ class Seq2SeqBase(nn.Module):
         
         return embeddings
     
-    def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:int, max_len : int,
+    def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:Union[int,float], max_len : int,
                          tgt_gt : torch.Tensor = None):    
             
         B = memory.size(0)
@@ -279,7 +279,7 @@ class Seq2SeqBase(nn.Module):
                         
             #top-K prediction
             tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None #(B,1)
-            next_token_idx = predict_topK(k,logits,tgt_token).reshape(logits.shape[:-1])[:,-1]  #(B,)
+            next_token_idx = predict_topK_P(k,logits,tgt_token).reshape(logits.shape[:-1])[:,-1]  #(B,)
 
             #next_token : (B,D)
             next_token = self.from_indexes_to_embeddings(next_token_idx)

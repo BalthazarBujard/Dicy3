@@ -190,7 +190,7 @@ class Seq2SeqTrainer(nn.Module):
             loss += loss_ce + self.codebook_loss_alpha*codebook_loss
             
             #topK search
-            preds = predict_topK(self.k,logits,tgt_out)
+            preds = predict_topK_P(self.k,logits,tgt_out)
             
             acc += compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=self.model.special_tokens_idx["pad"])
             
@@ -199,6 +199,7 @@ class Seq2SeqTrainer(nn.Module):
         loss=loss/len(eval_fetcher)
         acc/=len(eval_fetcher)
         cb_usage/=len(eval_fetcher)
+        print("Codebook usage:",cb_usage)
         
         return loss, acc, cb_usage
     
@@ -272,7 +273,7 @@ class Seq2SeqTrainer(nn.Module):
         
         loss = self._compute_loss(logits, tgt_out, reg_alpha, codebook_loss)
         
-        preds = predict_topK(self.k,logits,tgt_out) 
+        preds = predict_topK_P(self.k,logits,tgt_out) 
         
         acc = compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=self.model.special_tokens_idx["pad"])
         

@@ -127,7 +127,7 @@ def build_ds(args):
     return train_roots,val_roots
 
 # WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
-def setup(rank, world_size,mastr_port=12355):
+def setup(rank, world_size,mastr_port=12356):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'
 
@@ -194,9 +194,11 @@ def main(rank, world_size, args):
     codebook_loss_weight = args.codebook_loss_weight
     
     k = args.k
-    if k<1:
-        k = int(k*args.vocab_size)
-    else : k = int(k)
+    if k>=1:
+        k=int(k)
+    #if k<1 :
+    #    k=int(k*args.vocab_size)
+    #else : k=int(k)
     
     PAD_IDX = seq2seq.special_tokens_idx["pad"] if seq2seq.use_special_tokens else -100 #pad index ignored for loss
     criterion = torch.nn.functional.cross_entropy #torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
@@ -261,7 +263,8 @@ if __name__=='__main__':
     run_id=args.run_id
     if run_id=='None' :
         run_id = f"{args.data}_{args.chunk_duration}s_{args.track_duration}s_A{args.vocab_size}_{args.pre_post_chunking}_D{args.dim}"
-        #run_id+= "learn_bb" if not args.freeze_backbone else ""
+        run_id+= "_learn_cb" if args.learnable_cb else ""
+        run_id+= "_restart_cb" if args.restart_codebook else ""
     
     
     new_run_id=run_id
