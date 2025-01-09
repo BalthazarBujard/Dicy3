@@ -55,7 +55,7 @@ class MusicContainer(Dataset):
     Dataset class for containing audio chunks used to train and/or evaluate encoding models
     """
     def __init__(self, root:Union[Union[str,Path], List[Union[str,Path]]], max_duration:float, sampling_rate:float, segmentation_strategy:str, 
-                 non_empty=False, ignore_instrument = [], max_time:float=600.0, verbose:float=False, init_chunk=True):
+                 non_empty=False, ignore_instrument = [], max_time:float=600.0, verbose:float=False, init_chunk=True, hop_size : float=None):
         """
         Parameters
         ----------
@@ -93,6 +93,8 @@ class MusicContainer(Dataset):
         self.sampling_rate=sampling_rate
         self.ignore_instrument = ignore_instrument
         self.verbose=verbose
+        self.hop_size=self.max_duration*2/3 if not hop_size else hop_size
+        
         
         #extract files from folder(s) or paths
         
@@ -353,10 +355,10 @@ class MusicContainer(Dataset):
             chunks=[[0,duration]]
         
         elif strategy=='sliding':
-            hop_size = self.max_duration / 3  # hop size is the third of the chunk size
+            #hop_size = self.max_duration / 3  # hop size is the third of the chunk size
 
             chunks = []
-            for start in np.arange(0, duration, hop_size):
+            for start in np.arange(0, duration, self.hop_size):
                 end = start + self.max_duration
                 
                 if end > duration : #dont take last chunk if greater 
@@ -553,11 +555,11 @@ class MusicContainerPostChunk(MusicContainer):
     
     def segment_track_sliding(self, track, return_slices=False):
         max_samples = int(self.max_duration * self.sampling_rate)  # max samples per chunk
-        hop_size = max_samples // 2  # hop size is half of the chunk size
+        hop_size_samples = int(self.hop_size*self.sampling_rate) #max_samples // 2  # hop size is half of the chunk size
 
         chunks = []
         slices = []
-        for start in range(0, len(track), hop_size):
+        for start in range(0, len(track), hop_size_samples):
             end = start + max_samples
             if end > len(track):
                 # If the end exceeds the track length, pad the last chunk
@@ -584,19 +586,21 @@ class MusicContainer4dicy2(Dataset):
     def __init__(self,track_path:Union[Union[str,Path], List[Union[str,Path]]], 
                  track_duration:float, max_duration:float, sampling_rate:float, 
                  segmentation_strategy:str, pre_segemntation:str='uniform',
-                 timestamps=None):
+                 timestamps=None, hop_size:float=None):
         
         super().__init__()
         self.sampling_rate=sampling_rate
         self.track_duration=track_duration
         self.max_duration=max_duration
         self.segmentation_strategy=segmentation_strategy
+        self.pre_segmentation_strategy = pre_segemntation
         if timestamps!=None:
             t0,t1=timestamps 
             duration = t1-t0
         else :
             t0=0
             duration = None
+        self.hop_size = self.track_duration*2/3 if not hop_size else hop_size
         
         if isinstance(track_path,List):
             #open each track and combine
@@ -708,10 +712,10 @@ class MusicContainer4dicy2(Dataset):
                 chunks = [track]
         
         elif strategy=='sliding':
-            hop_size = int(max_samples // 3)  # hop size is the third of the chunk size
+            hop_size_samples = int(self.hop_size*sampling_rate) #int(max_samples // 3)  # hop size is the third of the chunk size
 
             chunks = []
-            for start in range(0, track_duration, hop_size):
+            for start in range(0, track_duration, hop_size_samples):
                 end = start + max_samples
                 
                 if end > track_duration : #dont take last chunk if greater 

@@ -76,6 +76,9 @@ class Backbone(nn.Module):
     #def _get_feat_extract_output_lengths(self,*args):
      #   self.backbone._get_feat_extract_output_lengths(*args)
     
+    def get_output_lengths(self,lengths:torch.Tensor) -> torch.Tensor:
+        return self.backbone._get_feat_extract_output_lengths(lengths)
+    
     @property
     def mean(self):
         return self.__mean
@@ -252,6 +255,10 @@ class LocalEncoder(nn.Module):
             
         return x
     
+    def get_output_lengths(self,lengths:torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("This function should return the equivalent length after collapsing (aka #chunks)")
+        #return self.encoder.get_output_lengths(lengths)
+    
     # computes padding mask after encoding (subsampling)
     # works with fairseq
     #from https://github.com/facebookresearch/fairseq/blob/main/fairseq/models/wav2vec/wav2vec2.py line 623
@@ -259,7 +266,7 @@ class LocalEncoder(nn.Module):
         if padding_mask is not None and padding_mask.any():
             input_lengths = (1 - padding_mask.long()).sum(-1)
             # apply conv formula to get real output_lengths
-            output_lengths = self.encoder.backbone._get_feat_extract_output_lengths(input_lengths)
+            output_lengths = self.encoder.get_output_lengths(input_lengths)
             output_lengths=torch.where(output_lengths>x.size(1),x.size(1),output_lengths) #verify that output length is not bigger than actual length
 
             padding_mask = torch.zeros(
@@ -280,6 +287,13 @@ class LocalEncoder(nn.Module):
             padding_mask=torch.zeros(x.shape[:2],device=x.device).bool()
         
         return padding_mask
+    
+    def __call__(self, x : torch.Tensor,
+                sample_codebook_temp : float = None, #not used at thge moment
+                padding_mask : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor] :
+        return self.forward(x,
+                sample_codebook_temp, #not used at thge moment
+                padding_mask)
     
     def forward(self, x : torch.Tensor,
                 sample_codebook_temp : float = None, #not used at thge moment
@@ -308,7 +322,7 @@ class LocalEncoder(nn.Module):
             
             #reshape and process mask more complicated for post-chunking
             #we want to preserve the number of chunks --> pad to reshape as (B,chunks,-1,D)
-            T = torch.round(torch.tensor(x.size(1)/chunks)).int() #duration of a chunk to have 'chunks'
+            T = torch.round(torch.tensor(x.size(1)/chunks)).int() #duration of a chunk to have same number of chunks in output
             #the total duration of the sequence
             new_L = chunks*T
             #pad length to have new_L

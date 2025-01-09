@@ -46,31 +46,44 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     last_slice=0
     native_chunk_idx = 0
     
-    #IT WONT WORK LIKE THIS DUE TO THE SUBSAMPLING !!! COULD USE HOP RATIO ON OUTPUT LENGTH BUT CHECK IF IT WORKS !!
-    """ if track_segmentation=='sliding':
-        hop_size = int(max_track_duration*sampling_rate//memory_ds.hop_ratio) #same hop ratio for both memory and src """
+    sliding = memory_ds.pre_segmentation_strategy =='sliding' #if we generate memory using sliding windows (using context of previous chunk)
+    
+    if sliding:
+        output_hop_size = memory_ds.hop_size/memory_ds.max_duration #the equivalent hop size in chunks
+        
+        if not output_hop_size.is_integer():
+            raise RuntimeError("If hop size is not a multiple of chunk size there wont be an integer number of chunks equivalent to hop_size...")
+        
+        output_hop_size=int(output_hop_size)
+        print(memory_ds.hop_size,output_hop_size)
     
     for i in range(len(memory_fetcher)):
         memory_data = next(memory_fetcher) #contains chunks and other data for model
         #encode memory -> extract labels for each slice/chunk
-        z, memory_idx, _ = model.encoder(memory_data.src, padding_mask = memory_data.src_padding_masks[0])
-        
-        """ if track_segmentation == 'sliding':
-            #here keep only the idxs after the hop
-            if i != 0: #if first segment there is no context -> take all
-                memory_idx = memory_idx[:,-hop_size:] #take last hop_size bit
-                memory_data.slices = memory_data.slices[:,-hop_size:] """
+        memory_idx = model.encoder(memory_data.src, padding_mask = memory_data.src_padding_masks[0])[1] #(B,S)
         
         #corpus = memory as [(label, content)] where label is codebook index from encoding and content is the slice index
         
         #TODO : OPTIMIZE THIS CODE PART
-        for idxs, slices in zip(memory_idx,memory_data.slices):
+        for j,(idxs, slices) in enumerate(zip(memory_idx,memory_data.slices)):
+            
+            #retrieve corresponding memory chunks
+            memory_chunks=memory_ds.get_native_chunks(native_chunk_idx) #unprocessed chunks with native sr
+            
+            if sliding:
+                if not (i==0 and j==0): #except for first chunk of first batch
+
+                    idxs = idxs[-output_hop_size:] #only keep the continuation of context (given by previous chunk)
+                    
+                    slices = slices[-output_hop_size:] #only keep actual slices (rmeove context)
+                    slices = slices - slices[0] #shift left slices
+                    
+                    memory_chunks = memory_chunks[-output_hop_size:] #crop memeory chunks too
+            
             print(idxs,slices)
             corpus_data.extend([(label.item(), last_slice+content.item()) for label,content in zip(idxs,slices)])
             last_slice = corpus_data[-1][1]+1 #slices only go from 0 to max so we need to update the real slice index basded on ietration
         
-            #retrieve corresponding memory chunks
-            memory_chunks=memory_ds.get_native_chunks(native_chunk_idx) #unprocessed chunks with native sr
             all_memory_chunks.extend(memory_chunks) #append to list of all chunks
             
             native_chunk_idx+=1
@@ -102,14 +115,25 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
     
     collate_fn = MusicDataCollator(with_slices=True,unifrom_chunks=chunk_segmentation!="onset")
     src_loader = DataLoader(src_ds,batch_size,False,collate_fn=collate_fn)
-    src_fetcher=Fetcher(src_loader)
-    src_fetcher.device=model.device
+    src_fetcher = Fetcher(src_loader)
+    src_fetcher.device = model.device
     
-    eos=model.special_tokens_idx['eos']
+    eos = model.special_tokens_idx['eos']
     sos = model.special_tokens_idx["sos"]
     
     queries = [] #slice indexes
     searches_for = [] #classes
+    
+    sliding = src_ds.pre_segmentation_strategy =='sliding'
+    
+    if sliding:
+        output_hop_size = src_ds.hop_size/src_ds.max_duration #the equivalent hop size in chunks
+        
+        if not output_hop_size.is_integer():
+            raise RuntimeError("If hop size is not a multiple of chunk size there wont be an integer number of chunks equivalent to hop_size...")
+        
+        output_hop_size=int(output_hop_size)
+        print(src_ds.hop_size,output_hop_size)
     
     #now we iterate over all source chunks (sub-tracks) to create the whole response to input
     for i in range(len(src_fetcher)):
@@ -128,22 +152,35 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                                     torch.tensor([eos],device=model.device).expand(tgt_gt.size(0),1)],dim=1)
             else : tgt_gt = None
             
-            _,tgt_idx = model.coupling(encoded_src, 
+            #TODO : ADD ARGUMENT TO USE LAST PREDICTION AS BEGINNING OF TGT ?
+            tgt_idx = model.coupling(encoded_src, 
                                        src_pad_mask, 
                                        k, 
                                        max_len=len(encoded_src[0]),
                                        decoding_type=decoding_type,
                                        temperature=temperature,
-                                       tgt_gt=tgt_gt)
+                                       tgt_gt=tgt_gt)[1] #(B,T)
             
             #print("pred :",tgt_idx)
             #print("GT:",tgt_gt)
         
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
         
-        for idxs in tgt_idx:
-            search_for = np.array([label.item()  for label in idxs[1:]]) #dont take sos
+        print(tgt_idx)
+        
+        tgt_idx = tgt_idx[:,1:-1] #remove special_tokens (sos and theoric eos)
+        
+        for j,idxs in enumerate(tgt_idx):
+            print(j)
+            first = (i==0 and j==0) #first segment
+             
+            search_for = idxs.numpy(force=True) 
+            
+            if sliding and not first:
+                search_for = search_for[-output_hop_size:] #remove context (only after first segment)
 
+            print(search_for)
+            
             #crop response to eos if early stop
             if any(search_for==eos.item()):
                 search_for = search_for[:np.where(search_for==eos.item())[0][0]]
@@ -152,9 +189,18 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             if len(search_for)==0 :
                 if chunk_segmentation=='onset': raise NotImplementedError("Silence handling not implemented for onset segmentation")
                 
-                queries.extend([-1]*len(src_data.src[0])) #append as many silences as input chunks
-                searches_for.extend([None]*len(src_data.src[0]))
+                silence_q = [-1]*len(src_data.src[j])
+                silence_s = [None]*len(src_data.src[j])
+                
+                if sliding and not first :
+                    silence_q = silence_q[-output_hop_size:]
+                    silence_s = silence_s[-output_hop_size:]
+                
+                queries.extend(silence_q) #append as many silences as input chunks
+                searches_for.extend(silence_s)
                 continue
+            
+            print(search_for)
             
             searches_for.extend(search_for)
 
@@ -167,10 +213,15 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             #print("chunk slices :",slices)        
             
             #add silences to match input length
-            if len(slices)<len(src_data.src[0]) :
+            min_size = len(src_data.src[j]) if not sliding or first else output_hop_size
+            extra_silence = min_size-len(slices)
+            
+            if extra_silence>0 :
                 if chunk_segmentation=='onset': raise NotImplementedError("Silence handling not implemented for onset segmentation")
-                    
-                slices.extend([-1]*(len(src_data.src[0])-len(slices))) 
+                
+                silence = [-1]*(extra_silence)
+                
+                slices.extend(silence) 
             
             queries.extend(slices)
     
@@ -247,8 +298,8 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                       save_files=True,
                       save_dir='output'):
     
-    if track_segmentation=='sliding':
-        raise NotImplementedError("No concatenation of output for track chunking with sliding window...")
+    #if track_segmentation=='sliding':
+        #raise NotImplementedError("No concatenation of output for track chunking with sliding window...")
 
     if chunk_segmentation=='onset':
         raise ValueError("Concatenation algorithm not compatible with 'onset' segmentation")
@@ -460,3 +511,4 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with
     # Open the file in append mode and write the content
     with open(info_path, 'a') as file:
         file.write(content)
+

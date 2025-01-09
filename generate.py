@@ -20,7 +20,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
     MAX_CHUNK_DURATION=params['chunk_size']
     MAX_TRACK_DURATION=params['tracks_size']
     SEGMENTATION_STRATEGY = model.segmentation
-    PRE_SEGMENTATION_STARTEGY="uniform"
+    PRE_SEGMENTATION_STARTEGY= "sliding"#"uniform"
     
     if k>1:
         k=int(k)
@@ -143,7 +143,7 @@ if __name__=='__main__':
     #ckp = "runs/coupling/All_res0.5s_len30.0s_mix2stem_8.pt"
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_ckp",type=str)
-    parser.add_argument("--batch_size",type=int,default=1)
+    parser.add_argument("--batch_size",type=int,default=8)
     parser.add_argument("--ckp_file",type=str,help="Path to file containing the list of model checkpoints to generate with")
     """ parser.add_argument('-cd',"--chunk_duration",type=float)
     parser.add_argument('-td',"--track_duration",type=float) """
