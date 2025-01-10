@@ -11,7 +11,7 @@ import argparse
 from librosa import load
 
 
-def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temperature, force_coupling, fade_time, num_examples, data, save_dir, batch_size, from_subset=False):
+def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temperature, force_coupling, fade_time, num_examples, data, save_dir, batch_size, sliding, from_subset=False):
     model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -20,7 +20,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
     MAX_CHUNK_DURATION=params['chunk_size']
     MAX_TRACK_DURATION=params['tracks_size']
     SEGMENTATION_STRATEGY = model.segmentation
-    PRE_SEGMENTATION_STARTEGY= "sliding"#"uniform"
+    PRE_SEGMENTATION_STARTEGY= "uniform" if not sliding else "sliding"
     
     if k>1:
         k=int(k)
@@ -104,7 +104,7 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
                             save_dir=save_dir,
                             device=DEVICE)
             
-def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, force_coupling, fade_time,save_dir,smaller, batch_size,max_duration=60.):
+def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, force_coupling, fade_time,save_dir,smaller, batch_size, sliding,max_duration=60.):
     model, params, _ = load_model_checkpoint(model_ckp)
     #model.freeze()
     model.eval()
@@ -113,7 +113,7 @@ def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type,
     MAX_CHUNK_DURATION=params['chunk_size']
     MAX_TRACK_DURATION=params['tracks_size']
     SEGMENTATION_STRATEGY = model.segmentation
-    PRE_SEGMENTATION_STARTEGY="uniform"
+    PRE_SEGMENTATION_STARTEGY="uniform" if not sliding else "sliding"
     
     if k>=1:
         k=int(k)
@@ -145,8 +145,6 @@ if __name__=='__main__':
     parser.add_argument("--model_ckp",type=str)
     parser.add_argument("--batch_size",type=int,default=8)
     parser.add_argument("--ckp_file",type=str,help="Path to file containing the list of model checkpoints to generate with")
-    """ parser.add_argument('-cd',"--chunk_duration",type=float)
-    parser.add_argument('-td',"--track_duration",type=float) """
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
     parser.add_argument("--decoding_type", type = str, choices=['greedy','beam'])
@@ -154,6 +152,7 @@ if __name__=='__main__':
     parser.add_argument("--k",type=float,default=5)
     parser.add_argument("--force_coupling", action = 'store_true')
     parser.add_argument('--fade_time',type=float,default=0.04)
+    parser.add_argument("--sliding", action = "store_true")
     parser.add_argument("--num_examples",type=int, default=1)
     parser.add_argument("--smaller",action='store_true')
     parser.add_argument("--data")
@@ -186,6 +185,7 @@ if __name__=='__main__':
                             fade_time=args.fade_time,
                             num_examples=args.num_examples,data=args.data,save_dir=save_dir, 
                             batch_size=args.batch_size,
+                            sliding=args.sliding,
                             from_subset=args.from_subset)
         
         elif args.memory!=None and args.source!=None:
@@ -194,5 +194,6 @@ if __name__=='__main__':
                             args.fade_time,
                             save_dir,
                             args.smaller,
-                            args.batch_size)
+                            args.batch_size,
+                            args.sliding)
         else : raise ValueError("Either specify 'data' or give a source and memory path")

@@ -171,7 +171,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         tgt_idx = tgt_idx[:,1:-1] #remove special_tokens (sos and theoric eos)
         
         for j,idxs in enumerate(tgt_idx):
-            print(j)
+            print("chunk indexes (batch, track segment) :",i,j)
             first = (i==0 and j==0) #first segment
              
             search_for = idxs.numpy(force=True) 
@@ -210,13 +210,14 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             
             #memory slices index to retrieve
             slices=[typing.cast(Dicy2CorpusEvent, v.event).data if v is not None else -1 for v in output]
-            #print("chunk slices :",slices)        
+            print("chunk slices :",slices)        
             
             #add silences to match input length
             min_size = len(src_data.src[j]) if not sliding or first else output_hop_size
             extra_silence = min_size-len(slices)
             
             if extra_silence>0 :
+                print(f"adding silence : {extra_silence}")
                 if chunk_segmentation=='onset': raise NotImplementedError("Silence handling not implemented for onset segmentation")
                 
                 silence = [-1]*(extra_silence)

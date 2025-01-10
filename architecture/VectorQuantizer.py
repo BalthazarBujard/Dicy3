@@ -37,8 +37,8 @@ class KmeansQuantizer(nn.Module):
         self.restart = restart
         #self.codebook_usage = torch.zeros(self.codebook_size,dtype=torch.float32) 
         self.codebook_usage = torch.zeros(self.codebook_size)#register_buffer('codebook_usage',torch.zeros(self.codebook_size))
-        self.decay = 0.99
-        self.beta = 0.25
+        self.decay = torch.tensor(0.99)
+        self.beta = torch.tensor(0.25)
     
     @property
     def device(self):
@@ -91,13 +91,14 @@ class KmeansQuantizer(nn.Module):
                 #codebook restart only during training
                 
                 probs = encodings.mean(dim=0) #avg count of used encodings
-                self.codebook_usage.mul_(self.decay).add_(probs, alpha=(1-self.decay)) #moving average update
+                
+                self.codebook_usage.to(probs.device).mul_(self.decay.to(probs.device)).add_(probs, alpha=(1-self.decay.to(probs.device))) #moving average update
                 
                 _,indices = dist.sort(dim=0) #get closest z's to embeddings
                 new_features = x.detach()[indices[-1,:]]
                 
                 #decay based on codebook usage --> less used codebooks update more than those most used
-                decay = torch.exp(-(self.codebook_usage*self.codebook_size*10)/(1-self.decay)-1e-3).unsqueeze(1).repeat(1,self.dim)
+                decay = torch.exp(-(self.codebook_usage*self.codebook_size*10)/(1-self.decay)-1e-3).unsqueeze(1).repeat(1,self.dim).to(self.codebook.device)
                 self.codebook.data = self.codebook.data*(1-decay) + new_features * decay
                 
         #reshape to original shape
