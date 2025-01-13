@@ -109,7 +109,8 @@ class Seq2SeqTrainer(nn.Module):
                         "heads":self.model.decision.heads,
                         "norm_first":self.model.decision.norm_first,
                         "segmentation": self.segmentation,
-                        "top-K" : self.k
+                        "top-K" : self.k,
+                        "run_id" : self.trainer_name
                         
                   } 
         state_dict =self.model.state_dict() if isinstance(self.model,Seq2SeqBase) else self.model.module.state_dict() #if DDP model.module
@@ -207,6 +208,7 @@ class Seq2SeqTrainer(nn.Module):
         fig, ax1 = plt.subplots(figsize=(10,10),dpi=150)
         ax2=ax1.twinx()
         epochs = range(1,epoch+2)
+        print(epochs,train_losses)
         #plt.figure(figsize=(10,10),dpi=150)
         ax1.plot(epochs,train_losses,label="train loss", color="tab:blue")
         ax2.plot(epochs,train_acc,"--",label="train accuracy",color="tab:green")
@@ -306,11 +308,6 @@ class Seq2SeqTrainer(nn.Module):
         
         train_iter=epochs*len(train_fetcher) #total iterations
         
-        iter_count=0
-        if self.gpu_id==0:
-            progress_bar = tqdm(total=train_iter,initial=self.resume_epoch*len(train_fetcher))
-        
-        
         train_losses=[]
         val_losses=[]
         train_accs = []
@@ -318,21 +315,27 @@ class Seq2SeqTrainer(nn.Module):
         epoch_0=self.resume_epoch
         if self.resume_epoch>0:
             try :
-                d=np.load(f"/data3/ansynth_nonbp/bujard/DICY2/runs/coupling/eval_{self.trainer_name}.npy",allow_pickle=True)
+                d=np.load(f"/data3/anasynth_nonbp/bujard/Dicy3/runs/coupling/eval_{self.trainer_name}.npy",allow_pickle=True).item()
                 train_losses=d['train_loss']
                 val_losses=d['test_loss']
                 train_accs = d['train_acc']
                 val_accs = d['test_acc']
+                self.resume_epoch = len(train_losses) #reassign value to avoir error during plot etc
             except:
                 pass
         
-        best_loss = float('inf')
-        best_acc = 0
+        best_loss = float('inf') if len(val_losses)==0 else min(val_losses)
+        best_acc = 0 if len(val_accs)==0 else max(val_accs)
         best_codebook_usage=0
         
         init_temperature = self.codebook_sample_temperature
         
         self.train_fetcher = train_fetcher #to get params for saving
+        
+        iter_count=0
+        if self.gpu_id==0:
+            progress_bar = tqdm(total=train_iter,initial=self.resume_epoch*len(train_fetcher))
+        
         
         for epoch in range(self.resume_epoch,epochs):
             train_loss=0
@@ -388,10 +391,10 @@ class Seq2SeqTrainer(nn.Module):
             train_accs.append(train_acc)
             val_accs.append(val_acc)   
             
-            if epoch-epoch_0>0 and trial==None:   
+            if epoch>0 and trial==None:   
                 if self.gpu_id==0:
-                    self.plot_loss(epoch-epoch_0,train_losses, val_losses, train_accs, val_accs)
-            
+                    self.plot_loss(epoch,train_losses, val_losses, train_accs, val_accs)
+                    
             if val_acc>best_acc:#val_loss<best_loss:
                 best_loss=val_loss
                 best_codebook_usage = codebook_usage #like so they are not totally decorrelated during optim ?

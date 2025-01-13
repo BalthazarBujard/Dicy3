@@ -23,7 +23,7 @@ def train_parser():
     parser.add_argument('--codebook_loss_weight',type=float,default=0.25) #++ encoding et embeddings vont se rapprocher vite -> risque de collapse
     parser.add_argument('-head','--encoder_head',type=str,choices=['mean','attention'],default='mean')
     parser.add_argument('-condense','--condense_type',choices=['mask','weighed','none'],default='none')
-    parser.add_argument('-layers','--transformer_layers',type=int,default=8)
+    parser.add_argument('-layers','--transformer_layers',type=int,default=12)
     #parser.add_argument('-decoder','--decoder_only',action='store_true')
     #prRed("DECODER ONLY")
     parser.add_argument("--has_masking",action = 'store_true')

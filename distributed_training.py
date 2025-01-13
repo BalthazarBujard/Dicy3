@@ -179,7 +179,10 @@ def main(rank, world_size, args):
 
     if args.resume_ckp!='':
         seq2seq, params, optim_state_dict = load_model_checkpoint(args.resume_ckp)
-        run_id = params['run_id']
+        try:
+            run_id = params['run_id']
+        except KeyError:
+            run_id = os.path.basename(args.resume_ckp).split(".pt")[0]
     
     else : seq2seq=build_model(args)
     
