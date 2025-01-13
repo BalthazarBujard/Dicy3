@@ -37,7 +37,7 @@ class KmeansQuantizer(nn.Module):
         self.restart = restart
         #self.codebook_usage = torch.zeros(self.codebook_size,dtype=torch.float32) 
         self.codebook_usage = torch.zeros(self.codebook_size)#register_buffer('codebook_usage',torch.zeros(self.codebook_size))
-        self.decay = torch.tensor(0.99)
+        self.decay = torch.tensor(0.99) #0.99
         self.beta = torch.tensor(0.25)
     
     @property

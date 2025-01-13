@@ -203,9 +203,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             print(search_for)
             
             searches_for.extend(search_for)
-
             query = InfluenceQuery([LabelInfluence(label_type([v])) for v in search_for])
-
             output = generator.process_query(query)
             
             #memory slices index to retrieve

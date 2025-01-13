@@ -147,7 +147,7 @@ if __name__=='__main__':
     parser.add_argument("--ckp_file",type=str,help="Path to file containing the list of model checkpoints to generate with")
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
-    parser.add_argument("--decoding_type", type = str, choices=['greedy','beam'])
+    parser.add_argument("-decoding","--decoding_type", type = str, choices=['greedy','beam'])
     parser.add_argument("--temperature", type = float, default=1.)
     parser.add_argument("--k",type=float,default=5)
     parser.add_argument("--force_coupling", action = 'store_true')
