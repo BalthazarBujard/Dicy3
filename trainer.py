@@ -208,7 +208,6 @@ class Seq2SeqTrainer(nn.Module):
         fig, ax1 = plt.subplots(figsize=(10,10),dpi=150)
         ax2=ax1.twinx()
         epochs = range(1,epoch+2)
-        print(epochs,train_losses)
         #plt.figure(figsize=(10,10),dpi=150)
         ax1.plot(epochs,train_losses,label="train loss", color="tab:blue")
         ax2.plot(epochs,train_acc,"--",label="train accuracy",color="tab:green")
@@ -224,9 +223,9 @@ class Seq2SeqTrainer(nn.Module):
         ax1.set_xlabel("Epochs")
         ax1.set_ylabel("Cross Entropy")
         ax2.set_ylabel("Accuracy")
+        ax2.grid()
         fig.savefig(f"runs/coupling/Loss_{self.trainer_name}.png")
         fig.tight_layout()
-        plt.grid()
         fig.show()
     
     
@@ -294,9 +293,9 @@ class Seq2SeqTrainer(nn.Module):
                 
                 
                 #prGreen(f"Probs {torch.sort(probs[0][:10],dim=-1,descending=True)[0][:,:5].numpy(force=True)}") #show the 5 highest probabilities for 10 first tokens
-        
+        params = self.model.parameters() if not isinstance(self.model,DDP) else self.model.module.parameters()
         loss.backward()
-        
+        torch.nn.utils.clip_grad_norm_(params,1.0)
         if step%self.grad_accum_steps == 0 or step == len(train_fetcher):
             for optim in self.optimizer : optim.step()
         
@@ -409,6 +408,7 @@ class Seq2SeqTrainer(nn.Module):
                     # processes reach a specific point in the code before any of them can proceed
                     # further. In this case, it is used to ensure that rank 0 finishes saving before
                     # the other processes can proceed.
+                    
                     # torch.distributed.barrier()  # Ensure rank 0 finishes saving before others proceed
 
                     # # # Reload the checkpoint on non-zero ranks

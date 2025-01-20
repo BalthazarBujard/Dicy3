@@ -12,7 +12,7 @@ import soundfile as sf
 from librosa import resample
 from munch import Munch
 from concatenate import Concatenator, TimeStamp #custom library for concatenating audio chunks from time markers
-
+import time
 #for dicy2 library
 sys.path.insert(0,"/data3/anasynth_nonbp/bujard/Dicy2-python")
 
@@ -26,6 +26,13 @@ from dicy2.prospector import FactorOracleProspector # type: ignore
 from gig.main.corpus import GenericCorpus # type: ignore
 from gig.main.influence import LabelInfluence # type: ignore
 from gig.main.query import InfluenceQuery # type: ignore
+
+# import logging
+
+# verbose = True
+# log_level: int = logging.DEBUG if verbose else logging.INFO
+# logging.basicConfig(level=log_level, format='%(asctime)s.%(msecs)03d [%(levelname)s]: %(name)s: %(message)s',
+#                         datefmt="%H:%M:%S")
 
 def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoupling, chunk_segmentation : str, batch_size : int):
     
@@ -100,6 +107,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     prospector = FactorOracleProspector(corpus, label_type, max_continuity=max_continuity)
     generator = Dicy2Generator(prospector, force_output=force_output)
     print("Corpus (= GT):\n",[label for label,_ in corpus_data])
+    print(len(corpus_data))
     return memory_chunks, generator, labels
 
 
@@ -179,7 +187,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             if sliding and not first:
                 search_for = search_for[-output_hop_size:] #remove context (only after first segment)
 
-            print(search_for)
+            print(len(search_for),search_for)
             
             #crop response to eos if early stop
             if any(search_for==eos.item()):
@@ -200,11 +208,13 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                 searches_for.extend(silence_s)
                 continue
             
-            print(search_for)
+            print(len(search_for),search_for)
             
             searches_for.extend(search_for)
             query = InfluenceQuery([LabelInfluence(label_type([v])) for v in search_for])
+            t=time.time()
             output = generator.process_query(query)
+            print(time.time()-t,"s")
             
             #memory slices index to retrieve
             slices=[typing.cast(Dicy2CorpusEvent, v.event).data if v is not None else -1 for v in output]
@@ -283,7 +293,6 @@ def concatenate_response(memory:np.ndarray, memory_chunks:np.ndarray, queries:np
     
     return response
 
-#TODO : USE SLIDING WINDOW TO GENERATE NEW CHUNKS LABELS WITH SOME CONTEXT
 @torch.no_grad()
 def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2SeqBase,str],
                       k:int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool,

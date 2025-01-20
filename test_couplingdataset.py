@@ -37,7 +37,7 @@ tracks = extract_all_groups(root,instruments_to_ignore=["other","drums","percuss
 #%%
 
 max_chunk_duration=0.5
-max_track_duration=15
+max_track_duration=5
 segmentation_strategy="uniform"
 pre_segmentation='sliding'
 coupling_ds = MusicCouplingContainer(tracks,max_track_duration, max_chunk_duration,16000,segmentation_strategy,pre_segmentation)#MusicCouplingDataset(root1_train,root2_train,max_track_duration, max_chunk_duration,16000,segmentation_strategy)
@@ -53,10 +53,13 @@ print(t1.shape,t2.shape)
 #print("C2 end:",coupling_ds.containers[0].container2.track_chunks[-5:])
 
 
+mask_prob = 0.3
+mask_len = 1
+num_heads = 4
 
 
 loader = DataLoader(coupling_ds,8,collate_fn=DataCollatorForCoupling(unifrom_chunks=segmentation_strategy!="onset",
-                                                                     mask_prob=0.5,mask_len=3),shuffle=True)
+                                                                     mask_prob=mask_prob,mask_len=mask_len),shuffle=True)
 load_iter=iter(loader)
 t_tot=0
 for _ in range(len(loader)):
@@ -67,6 +70,12 @@ for _ in range(len(loader)):
     print(src.shape,tgt.shape)
     print(src_mask_indices.shape,src_mask_indices)
     print(torch.bincount(src_mask_indices.int().reshape(-1))/len(src_mask_indices.reshape(-1)))
+    # T = src.size(1) 
+    # src_mask = torch.repeat_interleave(src_mask_indices.unsqueeze(1),repeats=T,dim=1) #(B,T,S)
+    # print(src_mask.shape,src_mask)
+    # #we need to repeat for every head of each example i.e. example 1 -> head1,head2,...,headN, then example 2 --> repeat on batch dimension
+    # src_mask = torch.repeat_interleave(src_mask,repeats = num_heads,dim=0) #(B*heads,T,S)
+    # print(src_mask.shape,src_mask)
     #print(src_pad_masks)
     #break
 print(f"Total time : {t_tot}")

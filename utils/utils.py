@@ -316,7 +316,7 @@ def find_non_empty(track,max_duration,sampling_rate,return_time=False):
                 if not return_time:
                     return chunks[0]
                 else :
-                    len(chunks[0]),len(chunks[0])+max_samples
+                    return len(chunks[0]),len(chunks[0])+max_samples
             
             non_empty_chunk = chunks[non_empty_chunk_idx]
             if not return_time:

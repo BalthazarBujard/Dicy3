@@ -128,6 +128,7 @@ def build_ds(args):
 
 # WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
 def setup(rank, world_size,mastr_port=12355):
+    #mastr_port=torch.randint(12355,12360)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'
 
@@ -266,6 +267,7 @@ if __name__=='__main__':
     run_id=args.run_id
     if run_id=='None' :
         run_id = f"{args.data}_{args.chunk_duration}s_{args.track_duration}s_A{args.vocab_size}_{args.pre_post_chunking}_D{args.dim}"
+        run_id += f"_masking_{args.mask_prob}" if args.has_masking else ""
         run_id+= "_learn_cb" if args.learnable_cb else ""
         run_id+= "_restart_cb" if args.restart_codebook else ""
     

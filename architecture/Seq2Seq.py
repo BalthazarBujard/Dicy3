@@ -128,9 +128,9 @@ class Seq2SeqBase(nn.Module):
         
         src_mask, tgt_mask = self._create_masks(src, tgt_input)
         
-         #apply source masking
-        if self.has_masking:
-            src[mask_time_indices]=self.spec_mask_embed
+        #apply source masking (if there is any)
+        if self.has_masking and mask_time_indices.any():
+            src[mask_time_indices]=self.spec_mask_embed #(B,S)
             
             T = src.size(1) if not self.decision.decoder_only else tgt_input.size(1)
             src_mask = torch.repeat_interleave(mask_time_indices.unsqueeze(1),repeats=T,dim=1) #(B,T,S)

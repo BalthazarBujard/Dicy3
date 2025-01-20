@@ -1057,8 +1057,8 @@ class MusicDataCollator:
         if self.mask_len<1 :
             raise ValueError("if 'mask_prob'>0. then mask len has to be greater than 0 too.")
         
-        if self.mask_prob*seq_len / self.mask_len < 1 :
-            raise ValueError("Combination of 'mask_prob' and 'mask_len' is too big for the input sequence")
+        # if self.mask_prob*seq_len / self.mask_len < 1 :
+        #     raise ValueError("Combination of 'mask_prob' and 'mask_len' is too big for the input sequence")
             
         
         mask_indices = compute_mask_indices((B,seq_len),torch.from_numpy(padding_mask),mask_prob=self.mask_prob,mask_length=self.mask_len,min_masks=1)
