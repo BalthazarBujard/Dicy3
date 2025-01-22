@@ -149,7 +149,7 @@ def generate_examples(tracks_list,model,k,with_coupling,track_duration,chunk_dur
                         track_segmentation='uniform',
                         chunk_segmentation=segmentation_strategy,
                         concat_fade_time=crossfade_time,
-                        remove=True,
+                        remove=False,
                         save_dir=save_dir,
                         tgt_sampling_rates={'solo':48000,'mix':16000},
                         max_output_duration=max_duration, mix_channels=1, timestamps=timestamps, #mix in mono for evaluation
@@ -169,7 +169,7 @@ def parse_args():
     parser.add_argument('--task', choices=['all','model','quality','apa','similarity','none'],nargs="*")
     parser.add_argument('--model_ckp',nargs='*')
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
-    parser.add_argument("--split", choices = ['val','subset_val','test'])
+    parser.add_argument("--split", choices = ['val','val_subset','test'])
     parser.add_argument('--k',type=float, default=5)
     #if already generated audio samples
     parser.add_argument("--generate",action='store_true')
@@ -192,18 +192,19 @@ def main():
     
     args = parse_args()
     if args.model_ckp == None:
-        name = args.data
-        root = f"/data3/anasynth_nonbp/bujard/DICY2/runs/coupling/{name}"
-        if name=="canonne":
-            models = [f"{name}_0.25_32",f"{name}_0.25_128",f"{name}_0.25_512",
-                    f"{name}_0.5_32",f"{name}_0.5_128",f"{name}_0.5_512_1",
-                    f"{name}_1_32",f"{name}_1_128",f"{name}_1_512"]
-        else :
-            models = [f"{name}_0.25_32_1",f"{name}_0.25_128",f"{name}_0.25_512",
-                    f"{name}_0.5_32",f"{name}_0.5_128",f"{name}_0.5_512",
-                    f"{name}_1_32",f"{name}_1_128",f"{name}_1_512"]
+        raise ValueError("Ce ne sont plus les memes noms de modele pour l'evaluation de toutes les combinaisons")
+        # name = args.data
+        # root = f"/data3/anasynth_nonbp/bujard/DICY2/runs/coupling/{name}"
+        # if name=="canonne":
+        #     models = [f"{name}_0.25_32",f"{name}_0.25_128",f"{name}_0.25_512",
+        #             f"{name}_0.5_32",f"{name}_0.5_128",f"{name}_0.5_512_1",
+        #             f"{name}_1_32",f"{name}_1_128",f"{name}_1_512"]
+        # else :
+        #     models = [f"{name}_0.25_32_1",f"{name}_0.25_128",f"{name}_0.25_512",
+        #             f"{name}_0.5_32",f"{name}_0.5_128",f"{name}_0.5_512",
+        #             f"{name}_1_32",f"{name}_1_128",f"{name}_1_512"]
         
-        model_ckps = [os.path.join(root,model)+'.pt' for model in models]
+        # model_ckps = [os.path.join(root,model)+'.pt' for model in models]
     else :
         model_ckps=args.model_ckp #with nargs=* --> always as list
     #model_ckps=[args.model_ckp]
@@ -231,7 +232,7 @@ def main():
         
         #load model only for generation or model eval
         if 'model' in args.task or args.generate:
-            model,params = load_model_checkpoint(model_ckp)
+            model,params,_ = load_model_checkpoint(model_ckp)
             model.to(device)
             
             #extract segmentation params
@@ -240,7 +241,7 @@ def main():
             segmentation_strategy = params['segmentation']
             
             if args.k>=1: #portion of vocab size
-                k = int(k)
+                k = int(args.k)
         
         
         path=os.path.abspath(__file__)
