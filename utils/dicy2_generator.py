@@ -233,7 +233,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                 slices.extend(silence) 
             
             queries.extend(slices)
-    
+    print("response len (in chunks)",len(queries))
     return queries, searches_for
 
 def index_to_timestamp(index : int, chunks:np.ndarray):
@@ -298,11 +298,11 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                       k:int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool,
                       max_track_duration:float,max_chunk_duration:float,
                       track_segmentation:str, chunk_segmentation:str,
-                      batch_size : int = 1,
+                      batch_size : int = 8,
                       concat_fade_time=0.04, remove=False, max_backtrack = None,
                       device=None,
                       sampling_rate=16000, tgt_sampling_rates : dict = {'solo':None,'mix':None},
-                      max_output_duration=None, mix_channels=2, timestamps=None,
+                      max_output_duration=None, mix_channels=2, timestamps=[None,None],
                       save_files=True,
                       save_dir='output'):
     
@@ -320,11 +320,11 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
 
     memory_ds = MusicContainer4dicy2(memory_path,max_track_duration,max_chunk_duration,sampling_rate,
                                     chunk_segmentation,pre_segemntation=track_segmentation,
-                                    timestamps=timestamps)
+                                    timestamps=timestamps[0])
 
     src_ds =  MusicContainer4dicy2(src_path,max_track_duration,max_chunk_duration,sampling_rate,
                                     chunk_segmentation,pre_segemntation=track_segmentation,
-                                    timestamps=timestamps)
+                                    timestamps=timestamps[1])
     
     #load model if checkpoint path is given
     if isinstance(model,str):
@@ -408,7 +408,8 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     #wav.write("output_mix.wav",rate=16000,data=mix)
     
     if max_output_duration!=None:
-        t0,t1 = find_non_empty(response,max_output_duration,memory_ds.native_sr,return_time=True)
+        #find non empty in response and crop everything else accordingly
+        t0,t1 = find_non_empty(response,max_output_duration,memory_ds.native_sr,return_time=True,find_max=True)
         memory = memory [t0:t1]
         response = response[t0:t1]
         source = source[t0:t1]

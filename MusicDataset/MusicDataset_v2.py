@@ -629,9 +629,9 @@ class MusicContainer4dicy2(Dataset):
                         tracks[i] = np.concatenate([tracks[i],np.zeros(pad)]) 
                         native_tracks[i]=np.concatenate([native_tracks[i],np.zeros(pad_nat)]) 
             
-            track = np.sum(tracks,axis=0)#np.mean(tracks,axis=0) #combined tracks
+            track = np.sum(tracks,axis=0) #combined tracks
             track = np.interp(track,(track.min(),track.max()),(-1,1))
-            native_track = np.sum(native_tracks,axis=0)#np.mean(native_tracks,axis=0)     
+            native_track = np.sum(native_tracks,axis=0) 
             native_track = np.interp(native_track,(native_track.min(),native_track.max()),(-1,1))
         
         else :

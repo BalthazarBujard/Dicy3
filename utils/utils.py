@@ -302,7 +302,7 @@ def extract_memory_path(file_path, index):
                     return memory_path
     return memory_path
 
-def find_non_empty(track,max_duration,sampling_rate,return_time=False):
+def find_non_empty(track,max_duration,sampling_rate,return_time=False,find_max=False):
         max_samples=int(max_duration*sampling_rate) #convert max_duration in samples
         N=len(track)//max_samples #how many chunks
         if N>0:
@@ -311,7 +311,11 @@ def find_non_empty(track,max_duration,sampling_rate,return_time=False):
             chunks_norm = (chunks-np.mean(chunks,axis=-1,keepdims=True))/(np.std(chunks,axis=-1,keepdims=True)+1e-5) #Z-score normalize
             energies = np.sum(chunks_norm**2,axis=-1) #energies accross chunks
             #find first occurence of energy above threshold
-            non_empty_chunk_idx = np.where(energies > 0.5)[0][0] if np.any(energies > 0.5) else None
+            if find_max:
+                non_empty_chunk_idx = np.argmax(energies)
+                
+            else : non_empty_chunk_idx = np.where(energies > 0.5)[0][0] if np.any(energies > 0.5) else None
+            
             if non_empty_chunk_idx==None : 
                 if not return_time:
                     return chunks[0]

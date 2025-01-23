@@ -127,8 +127,9 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
                  perplexity = {"mean":codebook_perplexity,"std":codebook_perplexity_std},
                  topK_sim = {"mean":cosine_sim,"std":cosine_sim_std})
 
-def generate_examples(tracks_list,model,k,with_coupling,track_duration,chunk_duration,
-                      segmentation_strategy,crossfade_time,max_duration,
+def generate_examples(tracks_list,model,k,with_coupling,decoding_type,temperature,force_coupling,
+                      track_duration,chunk_duration,
+                      segmentation_strategy,sliding,crossfade_time,max_duration,
                       save_dir,smaller=False):
     #tracks list is like [[t11,t12,...],...,[tm1,tm2,..,tmn]]
     bar = tqdm(range(len(tracks_list)))
@@ -136,22 +137,36 @@ def generate_examples(tracks_list,model,k,with_coupling,track_duration,chunk_dur
         #folder of multiple instruments
         #pick a source and memory
         memory = np.random.choice(tracks)
-        src = [t for t in tracks if t!=memory]
+        srcs = [t for t in tracks if t!=memory]
+        print(srcs)
+        src = np.random.choice(srcs, size = np.random.randint(1,len(srcs)),replace=False).tolist() #pick random subset of mix 
+        print(src)
+        # if max_duration>0:
+        #     y, sr = load(src,sr=None)
+        #     t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
+        #     timestamps=[None,[t0/sr,t1/sr]]
+        #     print(timestamps)
         
         if smaller: #find small chunk in track
             y,sr = load(src[np.random.randint(0,len(src))],sr=None)
             t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
-            timestamps = [t0/sr,t1/sr] #in seconds
-        else : timestamps=None
+            timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
+        else : timestamps=[None,None]
         
+        
+        # TODO : UTILISER SLIDING POUR GENERATION ? 
+        # and dont forget to change the sampling rates if other encoders for FAD are used
+        track_segmentation = "uniform" if not sliding else "sliding"
         #generate
-        output = generate(memory,src,model,k,with_coupling,track_duration,chunk_duration,
-                        track_segmentation='uniform',
+        output = generate(memory,src,model,k,
+                          with_coupling,decoding_type,temperature,force_coupling,
+                          track_duration,chunk_duration,
+                        track_segmentation=track_segmentation,
                         chunk_segmentation=segmentation_strategy,
                         concat_fade_time=crossfade_time,
                         remove=False,
                         save_dir=save_dir,
-                        tgt_sampling_rates={'solo':48000,'mix':16000},
+                        tgt_sampling_rates={'solo':48000,'mix':48000},
                         max_output_duration=max_duration, mix_channels=1, timestamps=timestamps, #mix in mono for evaluation
                         device=device)
         bar.update(1)
@@ -174,6 +189,10 @@ def parse_args():
     #if already generated audio samples
     parser.add_argument("--generate",action='store_true')
     parser.add_argument("--with_coupling",action='store_true')
+    parser.add_argument("--sliding",action='store_true')
+    parser.add_argument("--decoding_type",type=str,choices=['greedy','beam'])
+    parser.add_argument("--force_coupling",action='store_true')
+    parser.add_argument("--temperature",type=float, default=1.)
     parser.add_argument("--max_duration",type=float,default=60)
     parser.add_argument("--smaller",action='store_true')
     parser.add_argument("--crossfade_time",type=float,default=0.04)
@@ -240,21 +259,30 @@ def main():
             chunk_duration = params['chunk_size']
             segmentation_strategy = params['segmentation']
             
-            if args.k>=1: #portion of vocab size
-                k = int(args.k)
+        if args.k>=1: #portion of vocab size
+            k = int(args.k)
         
         
         path=os.path.abspath(__file__)
         dir = os.path.dirname(path)
         
-        k_fname = f"k_{int(args.k)}" if args.k>=1 else f"k_{int(args.k*100)}%"
+        k_fname = f"k_{int(args.k)}" if args.k>=1 else f"p_{int(args.k*100)}%"
         
         save_dir = os.path.join(dir,f'evaluation/{os.path.basename(model_ckp).split(".pt")[0]}/{args.split}/{args.data}/{k_fname}')
+        idx=1
+        while os.path.exists(save_dir):
+            save_dir+=f" {idx}"
+            idx+=1
         os.makedirs(save_dir,exist_ok=True)
         eval_file = os.path.join(save_dir,"eval.txt")
         
         #depends on dataset and split
         dataset = 'moisesdb_v2' if args.data == 'moises' else 'BasesDeDonnees'
+        
+        #save arguments/metadata in file
+        save_to_file({"":"-"*50},eval_file)
+        metadata={'k':k,"decoding type":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature, "sliding":args.sliding}
+        save_to_file(metadata,eval_file)
         
         #generate audio from corresponding data folder
         if args.generate:
@@ -262,8 +290,10 @@ def main():
             args.crossfade_time = min(args.crossfade_time,chunk_duration/2) #if fade_t too big for single chunks
 
             if args.data=='moises':
-                generate_examples(moises_tracks,model,k,args.with_coupling,track_duration,chunk_duration,
-                                segmentation_strategy,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
+                generate_examples(moises_tracks,model,k,args.with_coupling,
+                                  args.decoding_type,args.temperature,args.force_coupling,
+                                  track_duration,chunk_duration,
+                                segmentation_strategy,args.sliding,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
                 
             elif args.data == 'canonne':
                 #get all tracks in each duo
@@ -272,8 +302,10 @@ def main():
                 
                 duos_tracks = [[t1,t2] for t1,t2 in zip(dA1_tracks,dA2_tracks)]
 
-                generate_examples(duos_tracks,model,k,args.with_coupling,track_duration,chunk_duration,
-                                segmentation_strategy,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
+                generate_examples(duos_tracks,model,k,args.with_coupling,
+                                  args.decoding_type,args.temperature,args.force_coupling,
+                                  track_duration,chunk_duration,
+                                segmentation_strategy,args.sliding,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
                 
                 
                 #get all tracks in each trio
@@ -307,7 +339,7 @@ def main():
             output = evaluate_model(model,eval_fetcher,k)
             
             #save output to file
-            save_to_file({'k':k},eval_file)
+            #save_to_file({'k':k},eval_file)
             save_to_file(output,eval_file)
         
         #if no folders are given use the ones form generation
