@@ -9,24 +9,37 @@ from IPython.display import Audio
 import numpy as np
 import argparse
 from librosa import load
+import glob
 
-
-def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temperature, force_coupling, fade_time, num_examples, data, save_dir, batch_size, sliding, from_subset=False):
-    model, params, _ = load_model_checkpoint(model_ckp)
-    #model.freeze()
-    model.eval()
-    _=model.to(DEVICE) 
-
-    MAX_CHUNK_DURATION=params['chunk_size']
-    MAX_TRACK_DURATION=params['tracks_size']
-    SEGMENTATION_STRATEGY = model.segmentation
-    PRE_SEGMENTATION_STARTEGY= "uniform" if not sliding else "sliding"
+def generate_example(model,memory,src, track_duration, chunk_duration, segmentation, pre_segmentation,
+                     with_coupling,remove,k, decoding_type, temperature, force_coupling,
+                     fade_time,save_dir,smaller, batch_size,max_duration=60., device=None,
+                     tgt_sampling_rates={'solo':None,'mix':None},
+                     mix_channels = 2):
     
-    if k>1:
-        k=int(k)
-    #if k<1 :
-    #    k=int(k*params['vocab_size'])
-    #else : k=int(k)
+    if device == None : device = lock_gpu[0][0]
+    
+    if smaller: #find small chunk in track
+        y,sr = load(src[np.random.randint(0,len(src))],sr=None)
+        t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
+        timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
+    else : timestamps=[None,None]
+    
+    output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
+                      track_duration,chunk_duration,track_segmentation=pre_segmentation,
+                            chunk_segmentation=segmentation,
+                            batch_size=batch_size,
+                            concat_fade_time=fade_time,
+                            remove=remove, timestamps=timestamps,
+                            save_dir=save_dir, max_output_duration = max_duration,
+                            device=device)
+
+def generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
+                      with_coupling, remove, k, decoding_type, temperature, force_coupling, 
+                      fade_time, 
+                      num_examples, data, save_dir, batch_size, from_subset=False, smaller=False, max_duration=60.,device=None):
+    
+    if device == None : device = lock_gpu[0][0]
     
     val_folder = "val_subset" if from_subset else "val"
     
@@ -68,16 +81,21 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
             id = np.random.randint(0,len(tracks))
             memory = tracks[id] 
             src = [tracks[i] for i in range(len(tracks)) if i != id ]
+            
+            generate_example(model, memory, src, 
+                             track_duration,chunk_duration,segmentation,pre_segmentation,
+                             with_coupling,remove,k,decoding_type,temperature,force_coupling,
+                             fade_time,save_dir,smaller,batch_size,max_duration,device=device)
 
-            output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
-                            MAX_TRACK_DURATION,MAX_CHUNK_DURATION,
-                            track_segmentation=PRE_SEGMENTATION_STARTEGY,
-                            chunk_segmentation=SEGMENTATION_STRATEGY,
-                            batch_size=batch_size,
-                            concat_fade_time=fade_time,
-                            remove=remove,
-                            save_dir=save_dir,
-                            device=DEVICE)
+            # output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
+            #                 track_duration,chunk_duration,
+            #                 track_segmentation=segmentation,
+            #                 chunk_segmentation=pre_segmentation,
+            #                 batch_size=batch_size,
+            #                 concat_fade_time=fade_time,
+            #                 remove=remove,
+            #                 save_dir=save_dir,
+            #                 device=DEVICE)
         
 
     elif data == 'moises':
@@ -94,57 +112,29 @@ def generate_examples(model_ckp, with_coupling, remove, k, decoding_type, temper
             id= np.random.randint(0,len(tracks))
             memory = tracks[id] 
             src = [tracks[i] for i in range(len(tracks)) if i != id ]
-
-            output = generate(memory,src,model,k,with_coupling, decoding_type, temperature, force_coupling,
-                            MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
-                            chunk_segmentation=SEGMENTATION_STRATEGY,
-                            batch_size=batch_size,
-                            concat_fade_time=fade_time,
-                            remove=remove,
-                            save_dir=save_dir,
-                            device=DEVICE)
             
-def generate_example(model_ckp,memory,src,with_coupling,remove,k, decoding_type, temperature, force_coupling, fade_time,save_dir,smaller, batch_size, sliding,max_duration=60.):
-    model, params, _ = load_model_checkpoint(model_ckp)
-    #model.freeze()
-    model.eval()
-    _=model.to(DEVICE) 
+            generate_example(model, memory, src, 
+                             track_duration,chunk_duration,segmentation,pre_segmentation,
+                             with_coupling,remove,k,decoding_type,temperature,force_coupling,
+                             fade_time,save_dir,smaller,batch_size,max_duration,device=device)
 
-    MAX_CHUNK_DURATION=params['chunk_size']
-    MAX_TRACK_DURATION=params['tracks_size']
-    SEGMENTATION_STRATEGY = model.segmentation
-    PRE_SEGMENTATION_STARTEGY="uniform" if not sliding else "sliding"
-    
-    if k>=1:
-        k=int(k)
-    #if k<1 :
-    #    k=int(k*params['vocab_size'])
-    #else : k=int(k)
-    
-    if smaller: #find small chunk in track
-        y,sr = load(src[np.random.randint(0,len(src))],sr=None)
-        t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
-        timestamps = [t0/sr,t1/sr] #in seconds
-    else : timestamps=None
-    
-    output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
-                      MAX_TRACK_DURATION,MAX_CHUNK_DURATION,track_segmentation=PRE_SEGMENTATION_STARTEGY,
-                            chunk_segmentation=SEGMENTATION_STRATEGY,
-                            batch_size=batch_size,
-                            concat_fade_time=fade_time,
-                            remove=remove, timestamps=timestamps,
-                            save_dir=save_dir,
-                            device=DEVICE)
-
+            # output = generate(memory,src,model,k,with_coupling, decoding_type, temperature, force_coupling,
+            #                 track_duration,chunk_duration,track_segmentation=pre_segmentation,
+            #                 chunk_segmentation=segmentation,
+            #                 batch_size=batch_size,
+            #                 concat_fade_time=fade_time,
+            #                 remove=remove,
+            #                 save_dir=save_dir,
+            #                 device=DEVICE)
 
 
 if __name__=='__main__':
     
     #ckp = "runs/coupling/All_res0.5s_len30.0s_mix2stem_8.pt"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_ckp",type=str)
+    parser.add_argument("--model_ckp",type=str,nargs="*")
+    parser.add_argument("--model_ckps_folder",type=str)
     parser.add_argument("--batch_size",type=int,default=8)
-    parser.add_argument("--ckp_file",type=str,help="Path to file containing the list of model checkpoints to generate with")
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
     parser.add_argument("-decoding","--decoding_type", type = str, choices=['greedy','beam'])
@@ -162,38 +152,53 @@ if __name__=='__main__':
     parser.add_argument("--save_dir")
     args = parser.parse_args()
     
-    with_coupling = args.with_coupling
-    save_dir = "output" if args.save_dir==None else args.save_dir
-    save_dir = os.path.join(save_dir,os.path.basename(args.model_ckp).split(".pt")[0]) 
-    os.makedirs(save_dir,exist_ok=True)
-    
     # If a file with checkpoint paths is provided, read it and add to model_ckp
-    if args.ckp_file:
-        with open(args.ckp_file, 'r') as f:
-            file_ckps = [line.strip() for line in f.readlines()]
-    
+    if args.model_ckps_folder:
+        #find all ckp (*.pt) in the folder recursively
+        model_ckps = sorted(glob.glob(f"{args.model_ckps_folder}/**/*.pt",recursive=True))
+        
     elif args.model_ckp:
-        file_ckps=[args.model_ckp]
+        model_ckps=args.model_ckp
     
     else : raise ValueError("Either give a checkpoint file or a model checkpoint")
     
-    for model_ckp in file_ckps:
+    for model_ckp in model_ckps:
         print("Generating with model :",os.path.basename(model_ckp))
+        
+        save_dir = "output" if args.save_dir==None else args.save_dir
+        save_dir = os.path.join(save_dir,os.path.basename(model_ckp).split(".pt")[0]) 
+        os.makedirs(save_dir,exist_ok=True)
+        
+        model, params, _ = load_model_checkpoint(model_ckp)
+        model.eval()
+        _=model.to(DEVICE) 
+
+        chunk_duration=params['chunk_size']
+        track_duration=params['tracks_size']
+        segmentation = model.segmentation
+        pre_segmentation =  "uniform" if not args.sliding else "sliding"
+        
+        k=args.k
+        if k>=1:
+            k=int(k)
+        
         if args.data!=None:
-            generate_examples(model_ckp,with_coupling,args.remove,
-                            args.k, args.decoding_type, args.temperature, args.force_coupling,
+            generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
+                              args.with_coupling,args.remove,
+                            k, args.decoding_type, args.temperature, args.force_coupling,
                             fade_time=args.fade_time,
                             num_examples=args.num_examples,data=args.data,save_dir=save_dir, 
                             batch_size=args.batch_size,
-                            sliding=args.sliding,
-                            from_subset=args.from_subset)
+                            smaller=args.smaller,
+                            from_subset=args.from_subset, device=DEVICE)
         
         elif args.memory!=None and args.source!=None:
-            generate_example(model_ckp,args.memory,args.source,
-                            args.with_coupling,args.remove,args.k,args.decoding_type, args.temperature, args.force_coupling,
+            generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
+                            args.with_coupling,args.remove,k,args.decoding_type, args.temperature, args.force_coupling,
                             args.fade_time,
                             save_dir,
                             args.smaller,
                             args.batch_size,
-                            args.sliding)
+                            device=DEVICE)
+            
         else : raise ValueError("Either specify 'data' or give a source and memory path")

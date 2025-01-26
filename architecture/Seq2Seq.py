@@ -83,16 +83,16 @@ class Seq2SeqBase(nn.Module):
             self.special_token_embeddings = nn.Embedding(len(self.special_tokens),self.dim)
             for token_idx, attr in enumerate(self.special_tokens):
                 self.register_buffer(attr, torch.tensor(token_idx)) #needed in state dict but not trainable. used for embedding retrieval
+                self.special_tokens_idx[attr]=torch.tensor(self.codebook_size+extra_tokens) #maybe need to convert to float and send to device here
                 extra_tokens+=1
-                self.special_tokens_idx[attr]=torch.tensor(self.codebook_size+extra_tokens-1) #maybe need to convert to float and send to device here
-        
+                
         self.vocab_embedding_table = self.encoder.quantizer.codebook #contains only the vocabulary (not the special tokens)
         
         if has_masking:
             self.spec_mask_embed = nn.Parameter(torch.Tensor(self.dim).uniform_()) #masked indices embedding
         self.has_masking=has_masking
         
-        self.vocab_size = self.codebook_size + extra_tokens # vocab from 0 to codebook_size are real tokens and last reamining tokens are special tokens
+        self.vocab_size = self.codebook_size + extra_tokens # vocab from 0 to codebook_size-1 are real tokens and last reamining tokens are special tokens
         
         
     @property
@@ -234,8 +234,15 @@ class Seq2SeqBase(nn.Module):
         
         embeddings = torch.empty(size=indexes.shape+(self.dim,),device=self.device)
         
-        embeddings[~is_special_token] = self.vocab_embedding_table[indexes[~is_special_token]] #insert vocab embedding if idx in vocab range
-        embeddings[is_special_token] = self.special_token_embeddings(indexes[is_special_token] - self.codebook_size) #insert spec token embed if idx in spec tokens idxs
+        try :
+            embeddings[~is_special_token] = self.vocab_embedding_table[indexes[~is_special_token]] #insert vocab embedding if idx in vocab range
+            embeddings[is_special_token] = self.special_token_embeddings(indexes[is_special_token] - self.codebook_size) #insert spec token embed if idx in spec tokens idxs
+        
+        except Exception as e:
+            print("PROBLEME DE PASSAGE A INDEX A EMBEDDING")
+            print("idxs :",indexes)
+            print("special token mask :", is_special_token)
+            raise e
         
         return embeddings
     

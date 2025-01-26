@@ -3,6 +3,7 @@
 from architecture.Model import load_model_checkpoint
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from utils.utils import lock_gpu, prGreen, prRed, prYellow, detect_onsets, find_non_empty
+from .metrics import compute_accuracy
 import torch
 import numpy as np
 import sys, typing, os
@@ -132,6 +133,8 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
     queries = [] #slice indexes
     searches_for = [] #classes
     
+    accuracy = []
+    
     sliding = src_ds.pre_segmentation_strategy =='sliding'
     
     if sliding:
@@ -174,6 +177,10 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
         
+        #compute accuracy of predicted sequence
+        acc = compute_accuracy(tgt_idx.reshape(-1),tgt_gt.reshape(-1),pad_idx=model.special_tokens_idx['pad'])
+        accuracy.append(acc)
+        
         print(tgt_idx)
         
         tgt_idx = tgt_idx[:,1:-1] #remove special_tokens (sos and theoric eos)
@@ -195,25 +202,35 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             
             #with some models that collapsed there is only the eos token predicted and that riases error by influenceQuery
             if len(search_for)==0 :
+                prRed("Silence chunk...")
                 if chunk_segmentation=='onset': raise NotImplementedError("Silence handling not implemented for onset segmentation")
                 
                 silence_q = [-1]*len(src_data.src[j])
-                silence_s = [None]*len(src_data.src[j])
+                # silence_s = [None]*len(src_data.src[j])
                 
                 if sliding and not first :
                     silence_q = silence_q[-output_hop_size:]
-                    silence_s = silence_s[-output_hop_size:]
+                    # silence_s = silence_s[-output_hop_size:]
                 
                 queries.extend(silence_q) #append as many silences as input chunks
-                searches_for.extend(silence_s)
+                # searches_for.extend(silence_s)
                 continue
             
             print(len(search_for),search_for)
             
             searches_for.extend(search_for)
             query = InfluenceQuery([LabelInfluence(label_type([v])) for v in search_for])
+            
             t=time.time()
-            output = generator.process_query(query)
+            try :
+                output = generator.process_query(query)
+            except RecursionError as e:
+                
+                prRed(f"Recursion Error : {e}")
+                print("From query :",query)
+                prRed("Generating silent segment")
+                output = [None]*len(query)
+                
             print(time.time()-t,"s")
             
             #memory slices index to retrieve
@@ -230,11 +247,15 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                 
                 silence = [-1]*(extra_silence)
                 
-                slices.extend(silence) 
+                slices.extend(silence) #complete segment slices with silence (-1) to match length
             
             queries.extend(slices)
+    
+    accuracy = np.mean(accuracy)
+    
     print("response len (in chunks)",len(queries))
-    return queries, searches_for
+    
+    return queries, searches_for, accuracy
 
 def index_to_timestamp(index : int, chunks:np.ndarray):
     if index == -1: 
@@ -254,9 +275,9 @@ def indexes_to_timestamps(indexes,chunks):
     
     return markers
 
-def compute_consecutive_lengths(idxs):
-    if not idxs:
-        return []
+def compute_consecutive_lengths(idxs : np.ndarray):
+    # if not idxs:
+    #     return []
     
     lengths = []
     current_length = 1
@@ -341,15 +362,12 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     
     prYellow("Generating reponse...")
     tgt_gts = labels if force_coupling else None
-    queries, searches_for = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, temperature, batch_size, tgt_gts)
+    queries, searches_for, accuracy = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, temperature, batch_size, tgt_gts)
     source = src_ds.native_track
 
     prYellow("Concatenate response...")
     response = concatenate_response(memory,memory_chunks,queries,max_chunk_duration,memory_ds.native_sr,concat_fade_time,remove,max_backtrack)
     
-    prYellow("Computing statistics of consecutive segments...")
-    lengths = compute_consecutive_lengths(queries)
-    mean_len, median_len = np.mean(lengths), np.median(lengths)
      
     memory = np.array(memory)
     source = np.array(source)
@@ -367,6 +385,10 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     search_for = np.array(searches_for)
     
     #compute entropy of labels = search for -> diversity
+    prYellow("Computing statistics...")
+    lengths = compute_consecutive_lengths(query)
+    mean_len, median_len = np.mean(lengths), np.median(lengths)
+    
     counts = np.bincount(search_for,minlength=model.codebook_size)
     probs = counts/sum(counts)
     entropy = -sum([p*np.log2(p+1e-9) for p in probs]) #in bits
@@ -399,9 +421,6 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         original = normalize(original)
         
     
-    
-    
-       
     os.makedirs(save_dir,exist_ok=True)
     
     #wav.write("output.wav",rate=16000,data=response)
@@ -452,7 +471,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         idx = save_file(save_dir,"search_for",f"{mix_name}",search_for,"txt",orig_rate=None,tgt_rate=None)
         
         write_info(model,memory_path, src_path, mix_name, k, with_coupling, 
-                   remove, mean_len,median_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
+                   remove, accuracy, mean_len,median_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
                    decoding_type=decoding_type, temperature=temperature)
     
     return Munch(memory = memory,
@@ -498,7 +517,7 @@ def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate):
     
     return idx
 
-def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with_coupling, remove, mean_len, median_len, entropy, w_size, save_dir, decoding_type, temperature):
+def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with_coupling, remove, accuracy, mean_len, median_len, entropy, w_size, save_dir, decoding_type, temperature):
     # Ensure the info directory exists
     info_path = f"{save_dir}/info.txt"
     os.makedirs(os.path.dirname(info_path), exist_ok=True)
@@ -514,10 +533,10 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with
     + "\n".join(f"\t - {path}" for path in source_paths) + "\n"
     f"\tParams :\n"
     f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, temperature = {temperature}\n"
+
     f"\tAnalysis :\n"
-    f"\t\tmean_len = {mean_len:.2f}, median_len = {median_len:.2f}, entropy = {entropy:.2f} [Bits]\n\n")
+    f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, entropy = {entropy:.2f} [Bits]\n\n")
     
     # Open the file in append mode and write the content
     with open(info_path, 'a') as file:
         file.write(content)
-

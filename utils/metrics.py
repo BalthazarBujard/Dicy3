@@ -4,6 +4,11 @@ from pathlib import Path
 from fadtk import FrechetAudioDistance
 from fadtk.model_loader import CLAPLaionModel,EncodecEmbModel
 from fadtk.fad_batch import cache_embedding_files
+from utils.utils import lock_gpu
+from librosa.feature import mfcc
+from sklearn.mixture import GaussianMixture
+from librosa import load
+import numpy as np
 
 def compute_accuracy(pred_sequence, gt_sequence, pad_idx):
     correct = sum(1 for gt,pred in zip(gt_sequence,pred_sequence) if (gt==pred and gt != pad_idx))
@@ -21,51 +26,43 @@ def compute_entropy(input,min_length):
 
 #function to evaluate audio quality of predictions
 #ref and tgt are paths to folders containing audio files
-def evaluate_audio_quality(reference_dir : Path, target_dir : Path):
+def evaluate_audio_quality(reference_dir : Path, target_dir : Path, device=None):
     
-
-    # fad = FrechetAudioDistance(
-    #     model_name="encodec",
-    #     sample_rate=48000,
-    #     channels=2,
-    #     verbose=True
-    #     )
+    if device==None : device = lock_gpu()[0][0]
     
     model = EncodecEmbModel('48k')
+    model.device=device
     
     #compute embeddings
     for d in [reference_dir, target_dir]:
         if Path(d).is_dir():
-            cache_embedding_files(d, model, workers=2)
+            cache_embedding_files(d, model, workers=1)
+ 
+    fad = FrechetAudioDistance(model,audio_load_worker=1,load_model=False)
 
-    fad = FrechetAudioDistance(model,audio_load_worker=2,load_model=False)
-    #fad.device=device
     score = fad.score(reference_dir,target_dir)
+    
     return score
 
 #PROBLEM WITH CLAP EMBEDDING
-def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir : Path):
+def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir : Path, device = None):
 
     #background is the folder containing true pairs
     #fake_background is the folder containing misaligned pairs = mix with a random accompaniement from random track
-    #target is the folder containing the mix 
-    # fad = FrechetAudioDistance(
-    #     model_name="vggish",
-    #     sample_rate=16000,
-    #     use_pca=False, 
-    #     use_activation=False,
-    #     verbose=True
-    # )
-    #fad.device=device
+    #target is the folder containing the mix
+    
+    if device==None : device = lock_gpu()[0][0]
     
     model = CLAPLaionModel('music')
+    model.device=device
     
     #compute embeddings
     for d in [background_dir,fake_background_dir, target_dir]:
         if Path(d).is_dir():
-            cache_embedding_files(d, model, workers=2)
+            cache_embedding_files(d, model, workers=1)
     
-    fad = FrechetAudioDistance(model,audio_load_worker=2,load_model=False)
+    fad = FrechetAudioDistance(model,audio_load_worker=1,load_model=False)
+    
     
     fadYX_ = fad.score(target_dir,fake_background_dir) #fad target and fake bg
     fadYX = fad.score(target_dir,background_dir)
@@ -77,3 +74,27 @@ def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir :
     APA = 0.5 + (fadYX_ - fadYX)/fadXX_ 
     
     return APA, fads
+
+def evaluate_similarity(target : np.ndarray, tgt_sr : int, gt : np.ndarray, gt_sr : int, w_size : float = 0.05):
+    
+    #compute MFCC for target and gt tracks with frame size of 50ms (cf "Music Similarity") with no overlaping frames
+    N = int(w_size*tgt_sr)
+    tgt_mfcc = mfcc(y=target,sr=tgt_sr,n_mfcc=8,n_fft=N,hop_length=N) #(8,#frames) 
+    tgt_samples = np.swapaxes(tgt_mfcc,0,1) #(num samples = #frames, 8 = #features)
+    
+    N = int(w_size*gt_sr)
+    gt_mfcc = mfcc(y=gt,sr=gt_sr,n_mfcc=8,n_fft=N,hop_length=N)
+    gt_samples = np.swapaxes(gt_mfcc,0,1)
+    
+    
+    #fit GMMs with mfcc features
+    tgt_GMM = GaussianMixture(n_components=3,n_init=3,max_iter=300,random_state=42)
+    tgt_GMM.fit(tgt_samples)
+    
+    gt_GMM = GaussianMixture(n_components=3,n_init=3,max_iter=300,random_state=42)
+    gt_GMM.fit(gt_samples)
+    
+    #compute (log-)likelihood of "song A being generated from model B"
+    score = gt_GMM.score(tgt_samples)
+        
+    return score

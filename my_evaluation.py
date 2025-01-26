@@ -6,7 +6,7 @@ import torch
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from architecture.Model import load_model_checkpoint
 from MusicDataset.MusicDataset_v2 import Fetcher
-from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality
+from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality, evaluate_similarity
 from utils.utils import predict_topK_P,prGreen,build_coupling_ds, extract_memory_path,prYellow, find_non_empty
 from utils.coupling_ds_generator import extract_all_groups
 from top_k_validity import compute_similarity
@@ -15,41 +15,12 @@ import numpy as np
 from pathlib import Path
 from typing import Union
 from librosa import load
-from librosa.feature import mfcc
-from sklearn.mixture import GaussianMixture
 from munch import Munch
 import glob
-from utils.dicy2_generator import generate
 import argparse
+from generate import generate_example
 
-def evaluate_similarity(target : Path, gt : Path):
-    
-    w_size = 0.05 # seconds
-    
-    target, tgt_sr= load(target,sr=None, mono=True)
-    gt, gt_sr = load(gt,sr=None,mono=True)    
-        
-    #compute MFCC for target and gt tracks with frame size of 50ms (cf "Music Similarity") with no overlaping frames
-    N = int(w_size*tgt_sr)
-    tgt_mfcc = mfcc(y=target,sr=tgt_sr,n_mfcc=8,n_fft=N,hop_length=N) #(8,#frames) 
-    tgt_samples = np.swapaxes(tgt_mfcc,0,1) #(num samples = #frames, 8 = #features)
-    
-    N = int(w_size*gt_sr)
-    gt_mfcc = mfcc(y=gt,sr=gt_sr,n_mfcc=8,n_fft=N,hop_length=N)
-    gt_samples = np.swapaxes(gt_mfcc,0,1)
-    
-    
-    #fit GMMs with mfcc features
-    tgt_GMM = GaussianMixture(n_components=3,n_init=3,max_iter=300,random_state=42)
-    tgt_GMM.fit(tgt_samples)
-    
-    gt_GMM = GaussianMixture(n_components=3,n_init=3,max_iter=300,random_state=42)
-    gt_GMM.fit(gt_samples)
-    
-    #compute (log-)likelihood of "song A being generated from model B"
-    score = gt_GMM.score(tgt_samples)
-        
-    return score
+
     
 
 #this function evaluates the Decision module and the perception's quantized encoding
@@ -127,25 +98,24 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
                  perplexity = {"mean":codebook_perplexity,"std":codebook_perplexity_std},
                  topK_sim = {"mean":cosine_sim,"std":cosine_sim_std})
 
-def generate_examples(tracks_list,model,k,with_coupling,decoding_type,temperature,force_coupling,
+def generate_eval_examples(tracks_list,model,k,with_coupling,decoding_type,temperature,force_coupling,
                       track_duration,chunk_duration,
-                      segmentation_strategy,sliding,crossfade_time,max_duration,
-                      save_dir,smaller=False):
+                      segmentation,pre_segmentation,crossfade_time,max_duration,
+                      save_dir,smaller=False,random_subset=True, remove=False, batch_size=8):
+    
     #tracks list is like [[t11,t12,...],...,[tm1,tm2,..,tmn]]
     bar = tqdm(range(len(tracks_list)))
+    
     for tracks in tracks_list: #moises_tracks = [[t11,t12,...,t1N],...,[tM1,tM2,..,tMN']]
         #folder of multiple instruments
         #pick a source and memory
         memory = np.random.choice(tracks)
         srcs = [t for t in tracks if t!=memory]
         print(srcs)
-        src = np.random.choice(srcs, size = np.random.randint(1,len(srcs)),replace=False).tolist() #pick random subset of mix 
+        if random_subset:
+            src = np.random.choice(srcs, size = np.random.randint(1,len(srcs)),replace=False).tolist() if len(srcs)>1 else srcs #pick random subset of mix 
+        else : src = srcs
         print(src)
-        # if max_duration>0:
-        #     y, sr = load(src,sr=None)
-        #     t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
-        #     timestamps=[None,[t0/sr,t1/sr]]
-        #     print(timestamps)
         
         if smaller: #find small chunk in track
             y,sr = load(src[np.random.randint(0,len(src))],sr=None)
@@ -153,22 +123,28 @@ def generate_examples(tracks_list,model,k,with_coupling,decoding_type,temperatur
             timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
         else : timestamps=[None,None]
         
-        
-        # TODO : UTILISER SLIDING POUR GENERATION ? 
-        # and dont forget to change the sampling rates if other encoders for FAD are used
-        track_segmentation = "uniform" if not sliding else "sliding"
         #generate
-        output = generate(memory,src,model,k,
-                          with_coupling,decoding_type,temperature,force_coupling,
-                          track_duration,chunk_duration,
-                        track_segmentation=track_segmentation,
-                        chunk_segmentation=segmentation_strategy,
-                        concat_fade_time=crossfade_time,
-                        remove=False,
-                        save_dir=save_dir,
-                        tgt_sampling_rates={'solo':48000,'mix':48000},
-                        max_output_duration=max_duration, mix_channels=1, timestamps=timestamps, #mix in mono for evaluation
-                        device=device)
+        generate_example(
+            model,
+            memory, src,
+            track_duration, chunk_duration, segmentation, pre_segmentation,
+            with_coupling, remove, k, decoding_type, temperature, force_coupling,
+            crossfade_time, save_dir, smaller, batch_size,
+            max_duration, device=device, tgt_sampling_rates={'solo':48000,'mix':48000}, mix_channels=1
+        )
+        
+        # output = generate(memory,src,model,k,
+        #                   with_coupling,decoding_type,temperature,force_coupling,
+        #                   track_duration,chunk_duration,
+        #                 track_segmentation=track_segmentation,
+        #                 chunk_segmentation=segmentation_strategy,
+        #                 concat_fade_time=crossfade_time,
+        #                 remove=False,
+        #                 save_dir=save_dir,
+        #                 tgt_sampling_rates={'solo':48000,'mix':48000},
+        #                 max_output_duration=max_duration, mix_channels=1, timestamps=timestamps, #mix in mono for evaluation
+        #                 device=device)
+        
         bar.update(1)
         
     
@@ -183,6 +159,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', choices=['all','model','quality','apa','similarity','none'],nargs="*")
     parser.add_argument('--model_ckp',nargs='*')
+    parser.add_argument("--model_ckps_folder",type=str,default=None)
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
     parser.add_argument("--split", choices = ['val','val_subset','test'])
     parser.add_argument('--k',type=float, default=5)
@@ -195,8 +172,8 @@ def parse_args():
     parser.add_argument("--temperature",type=float, default=1.)
     parser.add_argument("--max_duration",type=float,default=60)
     parser.add_argument("--smaller",action='store_true')
-    parser.add_argument("--crossfade_time",type=float,default=0.04)
-    parser.add_argument("--quality_tgt_folder",default=None, help="target folder to generated samples to evaluate audio quality of the model") 
+    parser.add_argument("--crossfade_time",type=float,default=0.05)
+    parser.add_argument("--quality_tgt_folder",default=None, help="target folder ofr generated samples to evaluate audio quality of the model") 
     parser.add_argument("--apa_tgt_folder",default=None, help="target folder to generated to evaluate apa")
     parser.add_argument("--similarity_tgt_folder",default=None, help="target folder to evaluate music similarity")
     parser.add_argument("--similarity_gt_folder",default=None, help="ground truth folder to evaluate music similarity")
@@ -211,26 +188,19 @@ def main():
     
     args = parse_args()
     if args.model_ckp == None:
-        raise ValueError("Ce ne sont plus les memes noms de modele pour l'evaluation de toutes les combinaisons")
-        # name = args.data
-        # root = f"/data3/anasynth_nonbp/bujard/DICY2/runs/coupling/{name}"
-        # if name=="canonne":
-        #     models = [f"{name}_0.25_32",f"{name}_0.25_128",f"{name}_0.25_512",
-        #             f"{name}_0.5_32",f"{name}_0.5_128",f"{name}_0.5_512_1",
-        #             f"{name}_1_32",f"{name}_1_128",f"{name}_1_512"]
-        # else :
-        #     models = [f"{name}_0.25_32_1",f"{name}_0.25_128",f"{name}_0.25_512",
-        #             f"{name}_0.5_32",f"{name}_0.5_128",f"{name}_0.5_512",
-        #             f"{name}_1_32",f"{name}_1_128",f"{name}_1_512"]
+        assert args.model_ckps_folder != None, "If no model ckp given, specify folder containing all the models to evaluate."
         
-        # model_ckps = [os.path.join(root,model)+'.pt' for model in models]
+        #find all ckp (*.pt) in the folder recursively
+        model_ckps = sorted(glob.glob(f"{args.model_ckps_folder}/**/*.pt",recursive=True))
+        
     else :
         model_ckps=args.model_ckp #with nargs=* --> always as list
-    #model_ckps=[args.model_ckp]
+
+
+    if args.k>=1: #portion of vocab size
+        k = int(args.k)
     
-    task = args.task
-    #model_ckp = args.model_ckp
-    
+    pre_segmentation = "uniform" if not args.sliding else "sliding"
     
     for model_ckp in model_ckps:
         prYellow(os.path.basename(model_ckp))        
@@ -258,9 +228,6 @@ def main():
             track_duration = params['tracks_size']
             chunk_duration = params['chunk_size']
             segmentation_strategy = params['segmentation']
-            
-        if args.k>=1: #portion of vocab size
-            k = int(args.k)
         
         
         path=os.path.abspath(__file__)
@@ -269,10 +236,14 @@ def main():
         k_fname = f"k_{int(args.k)}" if args.k>=1 else f"p_{int(args.k*100)}%"
         
         save_dir = os.path.join(dir,f'evaluation/{os.path.basename(model_ckp).split(".pt")[0]}/{args.split}/{args.data}/{k_fname}')
-        idx=1
-        while os.path.exists(save_dir):
-            save_dir+=f" {idx}"
-            idx+=1
+        
+        # new_save_dir =  save_dir
+        # idx=1
+        # while os.path.exists(new_save_dir):
+        #     new_save_dir=save_dir + f" {idx}"
+        #     idx+=1
+        # save_dir = new_save_dir
+        
         os.makedirs(save_dir,exist_ok=True)
         eval_file = os.path.join(save_dir,"eval.txt")
         
@@ -290,10 +261,10 @@ def main():
             args.crossfade_time = min(args.crossfade_time,chunk_duration/2) #if fade_t too big for single chunks
 
             if args.data=='moises':
-                generate_examples(moises_tracks,model,k,args.with_coupling,
+                generate_eval_examples(moises_tracks,model,k,args.with_coupling,
                                   args.decoding_type,args.temperature,args.force_coupling,
                                   track_duration,chunk_duration,
-                                segmentation_strategy,args.sliding,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
+                                segmentation_strategy,pre_segmentation,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
                 
             elif args.data == 'canonne':
                 #get all tracks in each duo
@@ -302,10 +273,13 @@ def main():
                 
                 duos_tracks = [[t1,t2] for t1,t2 in zip(dA1_tracks,dA2_tracks)]
 
-                generate_examples(duos_tracks,model,k,args.with_coupling,
-                                  args.decoding_type,args.temperature,args.force_coupling,
-                                  track_duration,chunk_duration,
-                                segmentation_strategy,args.sliding,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
+                generate_eval_examples(
+                                        duos_tracks,model,k,args.with_coupling,
+                                        args.decoding_type,args.temperature,args.force_coupling,
+                                        track_duration,chunk_duration,segmentation_strategy,pre_segmentation,
+                                        args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller,
+                                        random_subset=False
+                                        )
                 
                 
                 #get all tracks in each trio
@@ -314,8 +288,14 @@ def main():
                 dA3_tracks = sorted(glob.glob(trios[2]+'/*.wav'))   
                 
                 trios_tracks = [[t1,t2,t3] for t1,t2,t3 in zip(dA1_tracks,dA2_tracks,dA3_tracks)]
-                generate_examples(trios_tracks,model,k,args.with_coupling,track_duration,chunk_duration,
-                                segmentation_strategy,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)                  
+                
+                generate_eval_examples(
+                                        trios_tracks,model,k,args.with_coupling,
+                                        args.decoding_type,args.temperature,args.force_coupling,
+                                        track_duration,chunk_duration,segmentation_strategy,pre_segmentation,
+                                        args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller,
+                                        random_subset=False
+                                        )
                     
         if 'model' in args.task:
             prGreen("Evaluating model...")
@@ -357,7 +337,7 @@ def main():
             ref_folder = f"/data3/anasynth_nonbp/bujard/data/{dataset}/eval/audio_quality/{args.split}"
             
             #compute audio quality
-            score = evaluate_audio_quality(ref_folder,tgt_folder)
+            score = evaluate_audio_quality(ref_folder,tgt_folder,device=device)
             print("audio quality =",score)
             #save to file
             save_to_file({'audio_quality':score},eval_file)
@@ -377,7 +357,7 @@ def main():
             fake_bg_folder = APA_root+'/misaligned'
             
             #compute APA
-            score,fads = evaluate_APA(bg_folder,fake_bg_folder,tgt_folder)
+            score,fads = evaluate_APA(bg_folder,fake_bg_folder,tgt_folder,device=device)
             
             print("APA =", score,"\nFADs :",fads)
             #save to file
@@ -407,7 +387,10 @@ def main():
             #compute similarity
             sims = []
             for tgt,gt in zip(targets,gts):
-                sim = evaluate_similarity(tgt,gt)
+                target, tgt_sr= load(tgt,sr=None, mono=True)
+                gt, gt_sr = load(gt,sr=None,mono=True)
+                
+                sim = evaluate_similarity(target, tgt_sr,gt, gt_sr)
                 sims.append(sim)
             
             mean_sim = np.mean(sims)
