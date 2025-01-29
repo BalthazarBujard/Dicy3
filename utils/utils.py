@@ -96,7 +96,7 @@ def lock_gpu(num_devices=1):
             try:
                     gpu_id_locked = gpl.obtain_lock_id(id=-1)
                     if gpu_id_locked!=-1:
-                        device = torch.device(f"cuda:{i}")
+                        device = torch.device(f"cuda:{i}") if num_devices>1 else torch.device("cuda")
                         prYellow(f"Locked GPU with ID {gpu_id_locked} on {device}")
                     else :
                         prRed("No GPU available.")
