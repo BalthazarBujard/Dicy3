@@ -19,6 +19,7 @@ from munch import Munch
 import glob
 import argparse
 from generate import generate_example
+import datetime
 
 
     
@@ -91,8 +92,8 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
     diversity = np.mean(divs)
     diversity_std = np.std(divs)
     
-    perplexity = np.mean(ppl)
-    perplexity_std = np.std(ppl)
+    perplexity = np.mean(perplexs)
+    perplexity_std = np.std(perplexs)
     
     codebook_usage = np.mean(cb_usage)
     codebook_usage_std = np.std(cb_usage)
@@ -263,12 +264,13 @@ def main():
         dataset = 'moisesdb_v2' if args.data == 'moises' else 'BasesDeDonnees'
         
         #save arguments/metadata in file
-        save_to_file({"":"-"*50},eval_file)
-        metadata={'k':k,"decoding type":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature, "sliding":args.sliding}
-        save_to_file(metadata,eval_file)
+        save_to_file({"":"-"*50,'date':datetime.datetime.now()},eval_file)
         
         #generate audio from corresponding data folder
         if args.generate:
+            generation_metadata={'task':'generate','k':k,"decoding type":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature, "sliding":args.sliding}
+            save_to_file(generation_metadata,eval_file)
+            
             prGreen("Generating audio...")
             args.crossfade_time = min(args.crossfade_time,chunk_duration/2) #if fade_t too big for single chunks
 
@@ -311,6 +313,10 @@ def main():
                     
         if 'model' in args.task:
             prGreen("Evaluating model...")
+            
+            model_eval_metadata = {'task':'model',"k":k, "decoding":"greedy GT selection"}
+            save_to_file(model_eval_metadata,eval_file)
+            
             #evaliate code related metrics        
             #load dataset 
             if args.data == 'canonne':            
@@ -337,6 +343,10 @@ def main():
         #if no folders are given use the ones form generation
         if 'quality' in args.task :
             prGreen("Evaluating audio quality...")
+            
+            quality_metadata = {"task":"audio quality"}
+            save_to_file(quality_metadata,eval_file)
+            
             #get the tgt folder if not given
             tgt_folder = args.quality_tgt_folder
             if tgt_folder == None:
@@ -356,6 +366,10 @@ def main():
             
         if 'apa' in args.task :
             prGreen("Evaluating APA...")
+            
+            apa_metadata = {"task":"APA"}
+            save_to_file(apa_metadata,eval_file)
+            
             tgt_folder = args.apa_tgt_folder
             if tgt_folder == None:
                 #get mix folder 
@@ -377,6 +391,10 @@ def main():
         
         if 'similarity' in args.task :
             prGreen("Evaluating Music Similarity...")
+            
+            sim_metadata={"task":"music similarity"}
+            save_to_file(sim_metadata,eval_file)
+            
             #we need to iterate over the response folder and the info.txt to get the corresponding gt
             tgt_folder = args.similarity_tgt_folder
             if tgt_folder == None :
