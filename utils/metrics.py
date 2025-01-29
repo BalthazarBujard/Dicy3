@@ -2,7 +2,7 @@ import torch
 from pathlib import Path
 #from frechet_audio_distance import FrechetAudioDistance
 from fadtk import FrechetAudioDistance
-from fadtk.model_loader import CLAPLaionModel,EncodecEmbModel
+from fadtk.model_loader import CLAPLaionModel,EncodecEmbModel,CLAPModel
 from fadtk.fad_batch import cache_embedding_files
 from utils.utils import lock_gpu
 from librosa.feature import mfcc
@@ -26,7 +26,7 @@ def compute_entropy(input,min_length):
 
 #function to evaluate audio quality of predictions
 #ref and tgt are paths to folders containing audio files
-def evaluate_audio_quality(reference_dir : Path, target_dir : Path, device=None):
+def evaluate_audio_quality(reference_dir : Path, target_dir : Path, fad_inf : bool, device=None):
     
     if device==None : device = lock_gpu()[0][0]
     
@@ -40,12 +40,12 @@ def evaluate_audio_quality(reference_dir : Path, target_dir : Path, device=None)
  
     fad = FrechetAudioDistance(model,audio_load_worker=1,load_model=False)
 
-    score = fad.score(reference_dir,target_dir)
+    score = fad.score(reference_dir,target_dir) if not fad_inf else fad.score_inf(reference_dir,target_dir)
     
     return score
 
 #PROBLEM WITH CLAP EMBEDDING
-def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir : Path, device = None):
+def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir : Path, embedding : str, fad_inf : bool, device = None):
 
     #background is the folder containing true pairs
     #fake_background is the folder containing misaligned pairs = mix with a random accompaniement from random track
@@ -53,7 +53,10 @@ def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir :
     
     if device==None : device = lock_gpu()[0][0]
     
-    model = CLAPLaionModel('music')
+    if embedding=="L-CLAP":
+        model = CLAPLaionModel('music') 
+    elif embedding == "CLAP":
+        model = CLAPModel()
     model.device=device
     
     #compute embeddings
@@ -64,9 +67,9 @@ def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir :
     fad = FrechetAudioDistance(model,audio_load_worker=1,load_model=False)
     
     
-    fadYX_ = fad.score(target_dir,fake_background_dir) #fad target and fake bg
-    fadYX = fad.score(target_dir,background_dir)
-    fadXX_ = fad.score(background_dir,fake_background_dir)
+    fadYX_ = fad.score(target_dir,fake_background_dir) if not fad_inf else fad.score_inf(target_dir,fake_background_dir) #fad target and fake bg
+    fadYX = fad.score(target_dir,background_dir) if not fad_inf else fad.score_inf(target_dir,background_dir) 
+    fadXX_ = fad.score(background_dir,fake_background_dir) if not fad_inf else fad.score_inf(background_dir,fake_background_dir)
     
     fads = {'XX_':fadXX_,"YX":fadYX,"YX_":fadYX_}
     

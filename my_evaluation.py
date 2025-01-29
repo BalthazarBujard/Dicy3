@@ -119,8 +119,10 @@ def generate_eval_examples(tracks_list,model,k,with_coupling,decoding_type,tempe
     #tracks list is like [[t11,t12,...],...,[tm1,tm2,..,tmn]]
     bar = tqdm(range(len(tracks_list)))
     
-    for tracks in tracks_list: #moises_tracks = [[t11,t12,...,t1N],...,[tM1,tM2,..,tMN']]
-        #folder of multiple instruments
+    for tracks in tracks_list: 
+        
+        #TODO : FOR BETTER EVALUATION PICK EVERY MEMORY IN LIST
+        
         #pick a source and memory
         memory = np.random.choice(tracks)
         srcs = [t for t in tracks if t!=memory]
@@ -146,17 +148,6 @@ def generate_eval_examples(tracks_list,model,k,with_coupling,decoding_type,tempe
             max_duration, device=device, tgt_sampling_rates={'solo':48000,'mix':48000}, mix_channels=1
         )
         
-        # output = generate(memory,src,model,k,
-        #                   with_coupling,decoding_type,temperature,force_coupling,
-        #                   track_duration,chunk_duration,
-        #                 track_segmentation=track_segmentation,
-        #                 chunk_segmentation=segmentation_strategy,
-        #                 concat_fade_time=crossfade_time,
-        #                 remove=False,
-        #                 save_dir=save_dir,
-        #                 tgt_sampling_rates={'solo':48000,'mix':48000},
-        #                 max_output_duration=max_duration, mix_channels=1, timestamps=timestamps, #mix in mono for evaluation
-        #                 device=device)
         
         bar.update(1)
         
@@ -186,6 +177,8 @@ def parse_args():
     parser.add_argument("--max_duration",type=float,default=60)
     parser.add_argument("--smaller",action='store_true')
     parser.add_argument("--crossfade_time",type=float,default=0.05)
+    parser.add_argument("--apa_emb",type=str,choices=["CLAP","L-CLAP"])
+    parser.add_argument("--fad_inf",action="store_true")
     parser.add_argument("--quality_tgt_folder",default=None, help="target folder ofr generated samples to evaluate audio quality of the model") 
     parser.add_argument("--apa_tgt_folder",default=None, help="target folder to generated to evaluate apa")
     parser.add_argument("--similarity_tgt_folder",default=None, help="target folder to evaluate music similarity")
@@ -344,7 +337,7 @@ def main():
         if 'quality' in args.task :
             prGreen("Evaluating audio quality...")
             
-            quality_metadata = {"task":"audio quality"}
+            quality_metadata = {"task":"audio quality", "fad_inf":args.fad_inf}
             save_to_file(quality_metadata,eval_file)
             
             #get the tgt folder if not given
@@ -359,7 +352,7 @@ def main():
             ref_folder = f"/data3/anasynth_nonbp/bujard/data/{dataset}/eval/audio_quality/{args.split}"
             
             #compute audio quality
-            score = evaluate_audio_quality(ref_folder,tgt_folder,device=device)
+            score = evaluate_audio_quality(ref_folder,tgt_folder,args.fad_inf,device=device)
             print("audio quality =",score)
             #save to file
             save_to_file({'audio_quality':score},eval_file)
@@ -367,7 +360,7 @@ def main():
         if 'apa' in args.task :
             prGreen("Evaluating APA...")
             
-            apa_metadata = {"task":"APA"}
+            apa_metadata = {"task":"APA","embedding":args.apa_emb}
             save_to_file(apa_metadata,eval_file)
             
             tgt_folder = args.apa_tgt_folder
@@ -383,7 +376,7 @@ def main():
             fake_bg_folder = APA_root+'/misaligned'
             
             #compute APA
-            score,fads = evaluate_APA(bg_folder,fake_bg_folder,tgt_folder,device=device)
+            score,fads = evaluate_APA(bg_folder,fake_bg_folder,tgt_folder,args.apa_emb,args.fad_inf,device=device)
             
             print("APA =", score,"\nFADs :",fads)
             #save to file
