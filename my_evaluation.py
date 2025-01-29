@@ -35,6 +35,7 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
     accs = []
     divs = []
     sims = []
+    cb_usage=[]
     perplexs=[]
     
     eos_idx = model.special_tokens_idx["eos"].to(device)
@@ -47,20 +48,27 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
             if type(model)==Seq2SeqCoupling:
                 src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices = inputs.values()
                 #compute output
-                logits, tgt, tgt_idx, _ = model(src, tgt, src_pad_mask, tgt_pad_mask)
+                logits, tgt, tgt_idx, _ = model.forward(src, tgt, src_pad_mask, tgt_pad_mask)
                 
             elif type(model)==Seq2SeqBase: #for autocompletion
                 src, src_pad_mask, src_mask_indices, label = inputs.values() 
                 #compute output
-                logits, tgt, tgt_idx, _ = model(src, src_pad_mask)
+                logits, tgt, tgt_idx, _ = model.forward(src, src_pad_mask)
             
             #encoded inputs
             encoded_src = model.encoder(src, padding_mask = src_pad_mask[0])[1] #only take cb indexes to compute entropy
                     
-            tgt_out = tgt_idx[:,1:] #ground truth
+            tgt_out = tgt_idx[:,1:] #ground truth (B,T)
             
             #topK search
-            preds = predict_topK_P(k,logits,tgt_out)
+            preds = predict_topK_P(k,logits,tgt_out) #(B*T,)
+            
+            #compute perplexity of predicted sequence
+            probs = logits.softmax(-1)
+            preds_probs = probs.reshape(-1,logits.size(-1)).gather(1,preds.unsqueeze(1)).squeeze(1) #retrieve logits of predicted tokens (B*T,)
+            avg_nll = -sum(torch.log(preds_probs))/len(preds_probs)
+            ppl = avg_nll.exp()
+            perplexs.append(ppl.item())
             
             #accuracy with topK
             accs.append(compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=model.special_tokens_idx["pad"]))
@@ -68,8 +76,8 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
             #diversity of pred
             divs.append(compute_entropy(preds,min_length=model.vocab_size).item())
             
-            #perplexity -> cb usage
-            perplexs.append(2**compute_entropy(encoded_src.reshape(-1),min_length=model.codebook_size).item())
+            #cb usage -> % of vocab size
+            cb_usage.append(2**compute_entropy(encoded_src.reshape(-1),min_length=model.codebook_size).item()/model.codebook_size)
             
             #topK validity
             sims.append(compute_similarity(tgt, tgt_idx, logits,
@@ -83,8 +91,11 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
     diversity = np.mean(divs)
     diversity_std = np.std(divs)
     
-    codebook_perplexity = np.mean(perplexs)
-    codebook_perplexity_std = np.std(perplexs)
+    perplexity = np.mean(ppl)
+    perplexity_std = np.std(ppl)
+    
+    codebook_usage = np.mean(cb_usage)
+    codebook_usage_std = np.std(cb_usage)
     
     sims = np.array(sims) #convert to numpy
     cosine_sim = np.mean(sims[:,0])
@@ -95,7 +106,8 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
     
     return Munch(accuracy={"mean":acc,"std":acc_std},
                  diversity={"mean":diversity,"std":diversity_std},
-                 perplexity = {"mean":codebook_perplexity,"std":codebook_perplexity_std},
+                 perpleity={"mean":perplexity,"std":perplexity_std},
+                 codebook_usage = {"mean":codebook_usage,"std":codebook_usage_std},
                  topK_sim = {"mean":cosine_sim,"std":cosine_sim_std})
 
 def generate_eval_examples(tracks_list,model,k,with_coupling,decoding_type,temperature,force_coupling,
