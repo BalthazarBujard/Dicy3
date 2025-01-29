@@ -13,7 +13,7 @@ import glob
 
 def generate_example(model,memory,src, track_duration, chunk_duration, segmentation, pre_segmentation,
                      with_coupling,remove,k, decoding_type, temperature, force_coupling,
-                     fade_time,save_dir,smaller, batch_size,max_duration=60., device=None,
+                     fade_time,save_dir,smaller, batch_size,max_duration=None, device=None,
                      tgt_sampling_rates={'solo':None,'mix':None},
                      mix_channels = 2):
     
@@ -32,12 +32,13 @@ def generate_example(model,memory,src, track_duration, chunk_duration, segmentat
                             concat_fade_time=fade_time,
                             remove=remove, timestamps=timestamps,
                             save_dir=save_dir, max_output_duration = max_duration,
+                            tgt_sampling_rates=tgt_sampling_rates, mix_channels=mix_channels,
                             device=device)
 
 def generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
                       with_coupling, remove, k, decoding_type, temperature, force_coupling, 
                       fade_time, 
-                      num_examples, data, save_dir, batch_size, from_subset=False, smaller=False, max_duration=60.,device=None):
+                      num_examples, data, save_dir, batch_size, from_subset=False, smaller=False, max_duration=None,device=None):
     
     if device == None : device = lock_gpu[0][0]
     
@@ -141,10 +142,11 @@ if __name__=='__main__':
     parser.add_argument("--temperature", type = float, default=1.)
     parser.add_argument("--k",type=float,default=5)
     parser.add_argument("--force_coupling", action = 'store_true')
-    parser.add_argument('--fade_time',type=float,default=0.04)
+    parser.add_argument('--fade_time',type=float,default=0.05)
     parser.add_argument("--sliding", action = "store_true")
     parser.add_argument("--num_examples",type=int, default=1)
     parser.add_argument("--smaller",action='store_true')
+    parser.add_argument("--max_duration",type=float)
     parser.add_argument("--data")
     parser.add_argument("--from_subset", action = 'store_true')
     parser.add_argument('--memory')
@@ -190,6 +192,7 @@ if __name__=='__main__':
                             num_examples=args.num_examples,data=args.data,save_dir=save_dir, 
                             batch_size=args.batch_size,
                             smaller=args.smaller,
+                            max_duration=args.max_duration,
                             from_subset=args.from_subset, device=DEVICE)
         
         elif args.memory!=None and args.source!=None:
@@ -199,6 +202,7 @@ if __name__=='__main__':
                             save_dir,
                             args.smaller,
                             args.batch_size,
+                            max_duration=args.max_duration,
                             device=DEVICE)
             
         else : raise ValueError("Either specify 'data' or give a source and memory path")

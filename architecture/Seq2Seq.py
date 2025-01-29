@@ -103,8 +103,9 @@ class Seq2SeqBase(nn.Module):
         for p in self.parameters():
             p.requires_grad = False
     
+    
     #tgt=src for this model
-    def forward(self, src, src_pad_mask, sample_codebook_temp=None,mask_time_indices=None):
+    def forward(self, src, src_pad_mask, sample_codebook_temp=None,mask_time_indices=None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
          
         #extract quantized vectors
         z_src, src_idx, codebook_loss = self.encoder(src, sample_codebook_temp) #output is a sequence of quantized vectors and corresponding indices in the vocabulary
@@ -234,15 +235,14 @@ class Seq2SeqBase(nn.Module):
         
         embeddings = torch.empty(size=indexes.shape+(self.dim,),device=self.device)
         
-        try :
-            embeddings[~is_special_token] = self.vocab_embedding_table[indexes[~is_special_token]] #insert vocab embedding if idx in vocab range
-            embeddings[is_special_token] = self.special_token_embeddings(indexes[is_special_token] - self.codebook_size) #insert spec token embed if idx in spec tokens idxs
+        embeddings[~is_special_token] = self.vocab_embedding_table[indexes[~is_special_token]] #insert vocab embedding if idx in vocab range
+        embeddings[is_special_token] = self.special_token_embeddings(indexes[is_special_token] - self.codebook_size) #insert spec token embed if idx in spec tokens idxs
         
-        except Exception as e:
-            print("PROBLEME DE PASSAGE A INDEX A EMBEDDING")
-            print("idxs :",indexes)
-            print("special token mask :", is_special_token)
-            raise e
+        # except Exception as e:
+        #     print("PROBLEME DE PASSAGE A INDEX A EMBEDDING")
+        #     print("idxs :",indexes)
+        #     print("special token mask :", is_special_token)
+        #     raise e
         
         return embeddings
     
@@ -416,7 +416,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
         super().__init__(localEncoder, decisionModule, max_len, use_special_tokens, has_masking)
        
         
-    def forward(self, src, tgt, src_pad_masks, tgt_pad_masks, sample_codebook_temp=None,mask_time_indices=None):
+    def forward(self, src, tgt, src_pad_masks, tgt_pad_masks, sample_codebook_temp=None,mask_time_indices=None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
          
         #sample dim padding masks
         src_pad_mask=src_pad_masks[0]

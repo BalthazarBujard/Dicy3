@@ -74,12 +74,13 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
         
         #TODO : OPTIMIZE THIS CODE PART
         for j,(idxs, slices) in enumerate(zip(memory_idx,memory_data.slices)):
+            first = (i==0 and j==0) #first segment
             
             #retrieve corresponding memory chunks
             memory_chunks=memory_ds.get_native_chunks(native_chunk_idx) #unprocessed chunks with native sr
             
             if sliding:
-                if not (i==0 and j==0): #except for first chunk of first batch
+                if not first: #except for first chunk of first batch
 
                     idxs = idxs[-output_hop_size:] #only keep the continuation of context (given by previous chunk)
                     
@@ -96,6 +97,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
             
             native_chunk_idx+=1
         
+        print(memory_idx.shape, memory_idx)
         labels.append(memory_idx.numpy(force=True))
     
     memory_chunks = all_memory_chunks #rename for simplicity
@@ -178,7 +180,9 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
         
         #compute accuracy of predicted sequence
-        acc = compute_accuracy(tgt_idx.reshape(-1),tgt_gt.reshape(-1),pad_idx=model.special_tokens_idx['pad'])
+        acc = -1
+        if tgt_gt!=None:
+            acc = compute_accuracy(tgt_idx.reshape(-1),tgt_gt.reshape(-1),pad_idx=model.special_tokens_idx['pad'])
         accuracy.append(acc)
         
         print(tgt_idx)
@@ -343,10 +347,11 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                                     chunk_segmentation,pre_segemntation=track_segmentation,
                                     timestamps=timestamps[0])
 
+
     src_ds =  MusicContainer4dicy2(src_path,max_track_duration,max_chunk_duration,sampling_rate,
                                     chunk_segmentation,pre_segemntation=track_segmentation,
                                     timestamps=timestamps[1])
-    
+
     #load model if checkpoint path is given
     if isinstance(model,str):
         prYellow("Loading model from checkpoint...")
