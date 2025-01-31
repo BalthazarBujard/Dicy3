@@ -9,6 +9,7 @@ from librosa.feature import mfcc
 from sklearn.mixture import GaussianMixture
 from librosa import load
 import numpy as np
+import glob
 
 def compute_accuracy(pred_sequence, gt_sequence, pad_idx):
     correct = sum(1 for gt,pred in zip(gt_sequence,pred_sequence) if (gt==pred and gt != pad_idx))
@@ -39,8 +40,12 @@ def evaluate_audio_quality(reference_dir : Path, target_dir : Path, fad_inf : bo
             cache_embedding_files(d, model, workers=1)
  
     fad = FrechetAudioDistance(model,audio_load_worker=1,load_model=False)
+    
+    if fad_inf:
+        target_files = [Path(f) for f in glob.glob(target_dir+"/*.wav")]
+        score = fad.score_inf(reference_dir,target_files).score
 
-    score = fad.score(reference_dir,target_dir) if not fad_inf else fad.score_inf(reference_dir,target_dir)
+    else : score = fad.score(reference_dir,target_dir) 
     
     return score
 
@@ -56,7 +61,10 @@ def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir :
     if embedding=="L-CLAP":
         model = CLAPLaionModel('music') 
     elif embedding == "CLAP":
-        model = CLAPModel()
+        model = CLAPModel("2023")
+    
+    else : raise ValueError("'embedding' should be CLAP or L-CLAP")
+    
     model.device=device
     
     #compute embeddings
@@ -66,10 +74,19 @@ def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir :
     
     fad = FrechetAudioDistance(model,audio_load_worker=1,load_model=False)
     
+    if fad_inf :
+        target_files = [Path(f) for f in glob.glob(target_dir+"/*.wav")]
+        fadYX_ = fad.score_inf(fake_background_dir,target_files).score #fad target and fake bg
+        
+        fadYX = fad.score_inf(background_dir,target_files).score
+        
+        fake_bg_files = [Path(f) for f in glob.glob(fake_background_dir+"/*.wav")]
+        fadXX_ = fad.score_inf(background_dir,fake_bg_files).score
     
-    fadYX_ = fad.score(target_dir,fake_background_dir) if not fad_inf else fad.score_inf(target_dir,fake_background_dir) #fad target and fake bg
-    fadYX = fad.score(target_dir,background_dir) if not fad_inf else fad.score_inf(target_dir,background_dir) 
-    fadXX_ = fad.score(background_dir,fake_background_dir) if not fad_inf else fad.score_inf(background_dir,fake_background_dir)
+    else :
+        fadYX_ = fad.score(fake_background_dir,target_dir) 
+        fadYX = fad.score(background_dir,target_dir) 
+        fadXX_ = fad.score(background_dir,fake_background_dir) 
     
     fads = {'XX_':fadXX_,"YX":fadYX,"YX_":fadYX_}
     

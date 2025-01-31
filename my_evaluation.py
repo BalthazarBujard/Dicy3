@@ -337,16 +337,22 @@ def main():
         if 'quality' in args.task :
             prGreen("Evaluating audio quality...")
             
-            quality_metadata = {"task":"audio quality", "fad_inf":args.fad_inf}
-            save_to_file(quality_metadata,eval_file)
-            
             #get the tgt folder if not given
             tgt_folder = args.quality_tgt_folder
             if tgt_folder == None:
                 tgt_folder = os.path.join(save_dir,"response")
             
+            #for badeline
+            if tgt_folder == "memory":
+                tgt_folder=os.path.join(save_dir,"memory")
+            
             if not os.path.exists(tgt_folder):
                 raise RuntimeError("Wrong or no corresponding folder for audio quality measure. Please generate audio or use '--generate'")
+            
+            
+            quality_metadata = {"task":"audio quality", "fad_inf":args.fad_inf, "tgt folder" : tgt_folder}
+            save_to_file(quality_metadata,eval_file)
+            
             
                 
             ref_folder = f"/data3/anasynth_nonbp/bujard/data/{dataset}/eval/audio_quality/{args.split}"
@@ -360,16 +366,22 @@ def main():
         if 'apa' in args.task :
             prGreen("Evaluating APA...")
             
-            apa_metadata = {"task":"APA","embedding":args.apa_emb}
-            save_to_file(apa_metadata,eval_file)
-            
             tgt_folder = args.apa_tgt_folder
             if tgt_folder == None:
                 #get mix folder 
                 tgt_folder = os.path.join(save_dir,"mix")
             
+            #for baseline 
+            elif tgt_folder == "original":
+                tgt_folder == os.path.join(save_dir,"original")
+            
             if not os.path.exists(tgt_folder):
                 raise RuntimeError("Wrong or no corresponding folder for APA measure. Please generate audio with '--generate'")
+            
+            
+            apa_metadata = {"task":"APA","embedding":args.apa_emb,"fad_inf":args.fad_inf,"tgt folder":tgt_folder}
+            save_to_file(apa_metadata,eval_file)
+            
             
             APA_root =  f"/data3/anasynth_nonbp/bujard/data/{dataset}/eval/APA/{args.split}"
             bg_folder = APA_root + '/background'
@@ -385,16 +397,23 @@ def main():
         if 'similarity' in args.task :
             prGreen("Evaluating Music Similarity...")
             
-            sim_metadata={"task":"music similarity"}
-            save_to_file(sim_metadata,eval_file)
-            
-            #we need to iterate over the response folder and the info.txt to get the corresponding gt
             tgt_folder = args.similarity_tgt_folder
+            
+            #we need to iterate over the response folder
             if tgt_folder == None :
                 tgt_folder = os.path.join(save_dir,"response")
             
+            #for baseline
+            if tgt_folder == "memory":
+                tgt_folder=os.path.join(save_dir,"memory")
+            
             if not os.path.exists(tgt_folder):
                 raise RuntimeError("Wrong or no corresponding folder for similarity measure. Please generate audio with '--generate'")    
+            
+            
+            sim_metadata={"task":"music similarity","tgt folder":tgt_folder}
+            save_to_file(sim_metadata,eval_file)
+            
             
             targets = sorted(glob.glob(tgt_folder+'/*.wav'))
             
