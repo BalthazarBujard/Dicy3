@@ -7,7 +7,7 @@ import transformers, fairseq
 import math
 from utils.utils import *
 from typing import Union, List, Tuple
-from VectorQuantizer import KmeansQuantizer
+from .VectorQuantizer import KmeansQuantizer
 
 # TODO : AJOUTER UN ARGUMENT POUR LE CAS OU ON FERAIT DU PRETRAIN DU BACKBONE, DANS CE CAS L'ARGUMENT MASK DOIT ETRE A TRUE MAIS DANS LE CAS GENERAL DE NOTRE APPLICATION 
 # ON NE PREVOIT PAS DE FAIRE D EPRE-TRAIN MAIS SIMPLEMENT DE L'ADAPTATION
