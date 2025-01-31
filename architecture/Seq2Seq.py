@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from .Encoder import LocalEncoder
 from .Decision import Decision
-from typing import Union,Tuple
+from typing import Union,Tuple,Optional
 import math
 import time
 from utils.utils import predict_topK_P
@@ -12,7 +12,7 @@ from scipy.stats import entropy
 
 
 #TODO : IS THIS FUNCTION A METHOD OF SEQ2SEQBASE ?
-def create_pad_mask(x:torch.Tensor, eos_idx : int):
+def create_pad_mask(x:torch.Tensor, eos_idx : int) -> torch.Tensor:
     eos_pos = (x==eos_idx)
     first_eos_pos = torch.argmax(eos_pos.float(),dim=1).unsqueeze(1)
     no_eos = ~eos_pos.any(dim=1) #finds where there is no eos
@@ -54,7 +54,8 @@ class PositionalEncoding(nn.Module):
 
 #TODO : IMPLEMENT generate() METHOD FOR FUTURE USE OF SEQUENCE CONTINUATION PREDICTION
 class Seq2SeqBase(nn.Module):
-    def __init__(self, localEncoder : LocalEncoder, decisionModule : Decision, max_len, use_special_tokens=True, has_masking=False): 
+    def __init__(self, localEncoder : LocalEncoder, decisionModule : Decision, 
+                 max_len : int, use_special_tokens : bool = True, has_masking : bool = False): 
         super().__init__()
         
         self.encoder = localEncoder#LocalEncoder(pretrained_backbone,quantizer,head_module=encoder_head)
@@ -105,10 +106,11 @@ class Seq2SeqBase(nn.Module):
     
     
     #tgt=src for this model
-    def forward(self, src, src_pad_mask, sample_codebook_temp=None,mask_time_indices=None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
+    def forward(self, src : torch.Tensor, src_pad_mask : torch.Tensor, 
+                sample_codebook_temp : float = None, mask_time_indices : torch.Tensor = None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
          
         #extract quantized vectors
-        z_src, src_idx, codebook_loss = self.encoder(src, sample_codebook_temp) #output is a sequence of quantized vectors and corresponding indices in the vocabulary
+        z_src, src_idx, codebook_loss = self.encoder.forward(src, sample_codebook_temp) #output is a sequence of quantized vectors and corresponding indices in the vocabulary
         
         #here append and prepend sos and eos if applied, along with pad tokens 
         if self.use_special_tokens:
@@ -116,7 +118,7 @@ class Seq2SeqBase(nn.Module):
             
             
         #add position information
-        z_src = self.pe(z_src)
+        z_src = self.pe.forward(z_src)
             
         src = z_src
         tgt = src.copy() #tgt=src for autocompletion
@@ -144,7 +146,7 @@ class Seq2SeqBase(nn.Module):
         
         return out, tgt, src_idx, codebook_loss #return predictions and encoded target sequence for loss computing
     
-    def _create_causal_mask(self,sz):
+    def _create_causal_mask(self, sz : int):
         mask = torch.triu(torch.ones((sz,sz), device=self.device), diagonal=1).to(torch.bool) #equivalent to generate_square_subsequent_mask
         return mask
     
@@ -229,7 +231,7 @@ class Seq2SeqBase(nn.Module):
 
         else : return self.vocab_embedding_table[index]
     
-    def from_indexes_to_embeddings(self, indexes : torch.Tensor):
+    def from_indexes_to_embeddings(self, indexes : torch.Tensor) -> torch.Tensor:
         special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=self.device)
         is_special_token = torch.isin(indexes,special_tokens_idxs) #special token positions mask
         
@@ -247,7 +249,7 @@ class Seq2SeqBase(nn.Module):
         return embeddings
     
     def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:Union[int,float], max_len : int,
-                         tgt_gt : torch.Tensor = None):    
+                         tgt_gt : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:    
             
         B = memory.size(0)
         
@@ -365,14 +367,11 @@ class Seq2SeqBase(nn.Module):
         probs = torch.tensor(candidate.compute_prob())
         llh=torch.log(probs)/(candidate.effective_length**0.75)
         
-        # states = torch.tensor(candidate.states)
-        # states_count = torch.bincount(states[:candidate.effective_length],minlength=self.vocab_size)
-        # H = entropy(states_count/sum(states_count))/torch.log(torch.tensor(self.vocab_size))
-        
-        return llh #+ 3*torch.log(H+1e-9)
+        return llh
 
     
-    def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k : int, max_len : int, temperature : float):
+    def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, 
+                              k : int, max_len : int, temperature : float) -> Tuple[torch.Tensor, torch.Tensor]:
         
         B = memory.size(0)
         
@@ -411,12 +410,30 @@ class Seq2SeqBase(nn.Module):
     
     
 class Seq2SeqCoupling(Seq2SeqBase):
-    def __init__(self, localEncoder:LocalEncoder, decisionModule : Decision, max_len, use_special_tokens=True, has_masking=False): #add params for transformer
+    def __init__(self, localEncoder:LocalEncoder, decisionModule : Decision, 
+                 max_len : int, use_special_tokens : bool = True, has_masking : bool = False): #add params for transformer
         
         super().__init__(localEncoder, decisionModule, max_len, use_special_tokens, has_masking)
        
+    def _apply_masking(self, x : torch.Tensor, mask_time_indices : torch.Tensor, tgt_input : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.decision.decoder_only : assert tgt_input != None, "if decoder only, tgt_input should be specified"
+        #take sos and eos into account
+        mask_time_indices = torch.cat([torch.tensor([False],device=self.device).expand(x.size(0),1),
+                                        mask_time_indices,
+                                        torch.tensor([False],device=self.device).expand(x.size(0),1)],dim=1)
         
-    def forward(self, src, tgt, src_pad_masks, tgt_pad_masks, sample_codebook_temp=None,mask_time_indices=None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
+        x[mask_time_indices]=self.spec_mask_embed
+        
+        T = x.size(1) if not self.decision.decoder_only else tgt_input.size(1) #self attention if decoder only and cross atention for decodr only
+        src_mask = torch.repeat_interleave(mask_time_indices.unsqueeze(1),repeats=T,dim=1) #(B,T,S)
+        #we need to repeat for every head of each example i.e. example 1 -> head1,head2,...,headN, then example 2 --> repeat on batch dimension
+        src_mask = torch.repeat_interleave(src_mask,repeats = self.decision.heads,dim=0) #(B*heads,T,S)
+        
+        return x, src_mask
+       
+    def forward(self, src : torch.Tensor, tgt : torch.TensorType, 
+                src_pad_masks : List[torch.Tensor], tgt_pad_masks : List[torch.Tensor], 
+                sample_codebook_temp : Optional[float] = None, mask_time_indices : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
          
         #sample dim padding masks
         src_pad_mask=src_pad_masks[0]
@@ -435,11 +452,10 @@ class Seq2SeqCoupling(Seq2SeqBase):
             z_src, src_idx, src_pad_mask = self._apply_special_tokens(z_src,src_idx, src_pad_mask)
             z_tgt, tgt_idx, tgt_pad_mask = self._apply_special_tokens(z_tgt,tgt_idx, tgt_pad_mask)
             
-            #z_src, src_idx, src_pad_mask, z_tgt, tgt_idx, tgt_pad_mask = outs
         
         #add position information
-        z_src = self.pe(z_src)
-        z_tgt = self.pe(z_tgt)
+        z_src = self.pe.forward(z_src)
+        z_tgt = self.pe.forward(z_tgt)
         
         #detach targets -> avoid gradient flowing from answers
         z_tgt = z_tgt.detach()
@@ -456,17 +472,18 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         #apply source masking
         if self.has_masking:
-            #take sos and eos into account
-            mask_time_indices = torch.cat([torch.tensor([False],device=self.device).expand(src.size(0),1),
-                                           mask_time_indices,
-                                           torch.tensor([False],device=self.device).expand(src.size(0),1)],dim=1)
+            src, src_mask = self._apply_masking(src, mask_time_indices, tgt_input)
+            # #take sos and eos into account
+            # mask_time_indices = torch.cat([torch.tensor([False],device=self.device).expand(src.size(0),1),
+            #                                mask_time_indices,
+            #                                torch.tensor([False],device=self.device).expand(src.size(0),1)],dim=1)
             
-            src[mask_time_indices]=self.spec_mask_embed
+            # src[mask_time_indices]=self.spec_mask_embed
             
-            T = src.size(1) if not self.decision.decoder_only else tgt_input.size(1) #self attention if decoder only and cross atention for decodr only
-            src_mask = torch.repeat_interleave(mask_time_indices.unsqueeze(1),repeats=T,dim=1) #(B,T,S)
-            #we need to repeat for every head of each example i.e. example 1 -> head1,head2,...,headN, then example 2 --> repeat on batch dimension
-            src_mask = torch.repeat_interleave(src_mask,repeats = self.decision.heads,dim=0) #(B*heads,T,S)
+            # T = src.size(1) if not self.decision.decoder_only else tgt_input.size(1) #self attention if decoder only and cross atention for decodr only
+            # src_mask = torch.repeat_interleave(mask_time_indices.unsqueeze(1),repeats=T,dim=1) #(B,T,S)
+            # #we need to repeat for every head of each example i.e. example 1 -> head1,head2,...,headN, then example 2 --> repeat on batch dimension
+            # src_mask = torch.repeat_interleave(src_mask,repeats = self.decision.heads,dim=0) #(B*heads,T,S)
             
         
         
@@ -477,8 +494,8 @@ class Seq2SeqCoupling(Seq2SeqBase):
     #TODO : MOVE ENCODE TO BASE CLASS
     #encode input sequence --> assign labels (codebook index,..)
     @torch.no_grad
-    def encode(self, src, src_pad_masks): #needs both pad masks
-        z_src, src_idx, codebook_loss = self.encoder(src, padding_mask = src_pad_masks[0])        
+    def encode(self, src : torch.Tensor, src_pad_masks : List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: #needs both pad masks
+        z_src, src_idx, codebook_loss = self.encoder.forward(src, padding_mask = src_pad_masks[0])        
         
         if self.use_special_tokens:
             z_src, src_idx, src_pad_mask = self._apply_special_tokens(z_src,src_idx, src_pad_masks[1])
@@ -493,12 +510,12 @@ class Seq2SeqCoupling(Seq2SeqBase):
     @torch.no_grad
     def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
                  k:int, max_len : int, decoding_type : str, temperature : float, 
-                 tgt_gt : torch.Tensor = None): 
+                 tgt_gt : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]: 
         
         src = encoded_src
         
         #apply position to src
-        src = self.pe(src)
+        src = self.pe.forward(src)
         
         memory = self.decision.encode(src,src_mask=None,src_pad_mask=src_pad_mask) #encode src once -> pass through Transformer encoder if enc-dec else will be = src
         
@@ -507,7 +524,8 @@ class Seq2SeqCoupling(Seq2SeqBase):
         return tgt, tgt_idx 
     
     @torch.no_grad 
-    def generate(self,src : torch.Tensor ,src_pad_masks : torch.Tensor, k : int = 1, max_len=None, temperature : float = 1):
+    def generate(self,src : torch.Tensor ,src_pad_masks : torch.Tensor, 
+                 k : int = 1, max_len : Optional[int] = None, temperature : float = 1) -> Tuple[torch.Tensor,torch.Tensor]:
         
         encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
         

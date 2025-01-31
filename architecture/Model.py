@@ -8,7 +8,7 @@ from fairseq.checkpoint_utils import load_model_ensemble_and_task
 import torch.nn as nn
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
-from typing import Tuple
+from typing import Tuple, Union
 from pathlib import Path
 
 #wrapper class to get eattributes without changing whole code
@@ -70,7 +70,7 @@ def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_non
     
     return model, model_params, optimizer_state_dict
 
-def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairseq") -> Backbone:
+def build_backbone(checkpoint : Path, type : str, mean : bool, pooling : bool, output_final_proj : bool, fw : str = "fairseq") -> Backbone:
     #load pretrained backbone
     if fw=="fairseq":
         models, _, _ = load_model_ensemble_and_task([checkpoint])
@@ -83,7 +83,7 @@ def build_backbone(checkpoint, type, mean, pooling, output_final_proj, fw="fairs
     
     return backbone
 
-def build_quantizer(dim, vocab_size, learnable_codebook, restart)-> KmeansQuantizer:
+def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, restart : bool)-> KmeansQuantizer:
     #vector quantizer  
     assert vocab_size in [16,32,64,128,256,512,1024]
     centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{dim}.npy",allow_pickle=True)
@@ -93,13 +93,9 @@ def build_quantizer(dim, vocab_size, learnable_codebook, restart)-> KmeansQuanti
     return vq
     
 
-# def build_localEncoder(backbone: Backbone, quantizer : nn.Module, head_module : str = "mean", condense_type=None, chunking:str='pre') -> LocalEncoder:
-#     encoder = LocalEncoder(backbone,quantizer,head_module,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
-#     return encoder
-
 def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone : bool, dim : int, 
                        vocab_size : int, learnable_codebook : bool, restart_codebook : bool,
-                       chunking : str, encoder_head : str, condense_type : str = None):
+                       chunking : str, encoder_head : str, condense_type : str = None) -> LocalEncoder:
     
     output_final_proj = dim==256 #if model dimension is 256 we want the final projection output, else 768 hidden layer output dim
     
@@ -129,62 +125,42 @@ def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone
 
 
 #create class for decision module to handle forward call in seq2seq
-def build_decision(dim, layers, vocab_size , inner_dim=2048, heads=8, dropout=0.1, decoder_only=False, norm_first=True) -> Decision:
+def build_decision(dim : int, layers : int, vocab_size : int, 
+                   inner_dim : int = 2048, heads : int = 8, dropout : float = 0.1, decoder_only : bool = False, 
+                   norm_first : bool = True) -> Decision:
+    
     decisionModule = Decision(dim, layers, vocab_size, inner_dim, heads, dropout, decoder_only, norm_first)
     return decisionModule
     
 
 
-def SimpleSeq2SeqModel(backbone_checkpoint,
-                       backbone_type, 
-                       dim,
-                       vocab_size,
-                       max_len,
-                       encoder_head,
-                       use_special_tokens,
-                       task,
-                       chunking,
-                       restart_codebook=False,
-                       condense_type=None,
-                       has_masking=False,
-                       freeze_backbone=True,
-                       learnable_codebook=False,
-                       transformer_layers=8,
-                       dropout=0.1,
-                       decoder_only=False,
-                       inner_dim=2048,
-                       heads=12,
-                       norm_first=True,
-                       kmeans_init=False,
-                       threshold_ema_dead_code=0,
-                       commit_weight=1.,
-                       diversity_weight=0.1):
+def SimpleSeq2SeqModel(backbone_checkpoint : Path,
+                       backbone_type : str, 
+                       dim : int,
+                       vocab_size : int,
+                       max_len : int,
+                       encoder_head : str,
+                       use_special_tokens : bool,
+                       task : str,
+                       chunking : str,
+                       restart_codebook : bool = False,
+                       condense_type : str = None,
+                       has_masking : bool = False,
+                       freeze_backbone : bool = True,
+                       learnable_codebook : bool = False,
+                       transformer_layers : int = 12,
+                       dropout : float = 0.1,
+                       decoder_only : bool = True,
+                       inner_dim : int = 2048,
+                       heads : int = 12,
+                       norm_first : bool = True,
+                       kmeans_init : bool = False,
+                       threshold_ema_dead_code : float = 0,
+                       commit_weight : float = 1.,
+                       diversity_weight :  float = 0.1):
     
     assert task.lower() in ["coupling","completion"]
     assert chunking in ['pre','post']
-    
-    """
-    ema_update =  not learnable_codebook
-    vq = VectorQuantize(dim,vocab_size, 
-                        commitment_weight=commit_weight,
-                        diversity_weight=diversity_weight,
-                        learnable_codebook=learnable_codebook,
-                        ema_update=ema_update,
-                        kmeans_init=kmeans_init,
-                        threshold_ema_dead_code=threshold_ema_dead_code)
-    
-   
-    vq = GumbelVectorQuantizer(dim,
-                               1,  #only one head for now
-                               vocab_size,
-                               diversity_weight)            
-                                 
-    vq = VectorQuantizer(dim, vocab_size,
-                         learnable_codebook=learnable_codebook,
-                         ema_update=ema_update,
-                         kmeans_init=kmeans_init,
-                         threshold_ema_dead_code=threshold_ema_dead_code)
-    """
     
     localEncoder=build_localEncoder(backbone_checkpoint,backbone_type, freeze_backbone, dim,
                                     vocab_size, learnable_codebook, restart_codebook, chunking,
@@ -203,4 +179,26 @@ def SimpleSeq2SeqModel(backbone_checkpoint,
     seq2seq = model_class(localEncoder, decision_module, max_len, use_special_tokens=use_special_tokens,has_masking=has_masking)
     return seq2seq
 
-    
+
+"""
+ema_update =  not learnable_codebook
+vq = VectorQuantize(dim,vocab_size, 
+                    commitment_weight=commit_weight,
+                    diversity_weight=diversity_weight,
+                    learnable_codebook=learnable_codebook,
+                    ema_update=ema_update,
+                    kmeans_init=kmeans_init,
+                    threshold_ema_dead_code=threshold_ema_dead_code)
+
+
+vq = GumbelVectorQuantizer(dim,
+                            1,  #only one head for now
+                            vocab_size,
+                            diversity_weight)            
+                                
+vq = VectorQuantizer(dim, vocab_size,
+                        learnable_codebook=learnable_codebook,
+                        ema_update=ema_update,
+                        kmeans_init=kmeans_init,
+                        threshold_ema_dead_code=threshold_ema_dead_code)
+"""

@@ -7,6 +7,7 @@ import transformers, fairseq
 import math
 from utils.utils import *
 from typing import Union, List, Tuple
+from VectorQuantizer import KmeansQuantizer
 
 # TODO : AJOUTER UN ARGUMENT POUR LE CAS OU ON FERAIT DU PRETRAIN DU BACKBONE, DANS CE CAS L'ARGUMENT MASK DOIT ETRE A TRUE MAIS DANS LE CAS GENERAL DE NOTRE APPLICATION 
 # ON NE PREVOIT PAS DE FAIRE D EPRE-TRAIN MAIS SIMPLEMENT DE L'ADAPTATION
@@ -16,7 +17,8 @@ class Backbone(nn.Module):
     General class for pretrained backbones
     
     """
-    def __init__(self, pretrained_model:nn.Module, type:str, mean=False, pooling=False, output_final_proj = False):
+    def __init__(self, pretrained_model:nn.Module, type:str, 
+                 mean:bool = False, pooling : bool = False, output_final_proj : bool = False):
         super().__init__()
         self.backbone = pretrained_model
         self.type = type
@@ -85,7 +87,7 @@ class Backbone(nn.Module):
     
     #TODO: DANS LA DOCUMENTATION DE HUGGING FACE ILS DISENT QUE LE WAV2VEC BASE A DES MEILEURS RESULTATS
     # SI EN INFERENCE ON DONNE PAS DE PAD MASK
-    def forward(self, x : torch.Tensor, padding_mask : torch.Tensor = None):
+    def forward(self, x : torch.Tensor, padding_mask : torch.Tensor = None) -> torch.Tensor :
         if self.type=="w2v":
             if isinstance(self.backbone, transformers.Wav2Vec2ForPreTraining):
                 if padding_mask!=None :
@@ -133,9 +135,10 @@ class Backbone(nn.Module):
 
 #TODO : DOUBLE CHECK IF THIS IMPLEMENTATION IS CORRECT ESPECIALLY THE CREATE_MASK METHOD                
 class TransformerEncoderBloc(nn.Module):
-    def __init__(self,embed_dim=768, 
-                 num_heads=12, dropout=0.2, inner_dim=2048,
-                 condense_type='mask'):
+    def __init__(self,
+                 embed_dim : int = 768, 
+                 num_heads : int = 12, dropout : float = 0.2, inner_dim : int = 2048,
+                 condense_type : str = 'mask'):
         
         assert condense_type in ['mask','weighed']
         super().__init__()
@@ -154,7 +157,7 @@ class TransformerEncoderBloc(nn.Module):
     def device(self):
         return next(self.parameters()).device
     
-    def _create_collapse_mask(self,S,T,idx=0):
+    def _create_collapse_mask(self,S,T,idx=0) -> torch.Tensor :
         mask = torch.full(size=(T,S), fill_value=-torch.tensor(float("inf")),device=self.device)
         mask[idx,:]=0 #create mask to mask all timesteps expect last one that attends to all  previous steps
         mask = torch.diagonal_scatter(mask,torch.zeros(min(T,S))) #let self attention because otherwise error during attention's softmax
@@ -169,7 +172,7 @@ class TransformerEncoderBloc(nn.Module):
         
         return mask
     
-    def forward(self,x:torch.Tensor, padding_mask : torch.Tensor = None): #x : (B,L,D)
+    def forward(self,x:torch.Tensor, padding_mask : torch.Tensor = None) -> torch.Tensor: #x : (B,L,D)
         
         #compute self-attention mask
         mask=self._create_collapse_mask(x.shape[1],x.shape[1]) if self.condense_type=='mask' else None #CAREFUL THAT TAKING LAST STEP IS OKAY (MAYBE WITH THE PADDING THERE IS NO INFO BUT MHA SHOULD LEARN TO PUT IT THERE)
@@ -198,8 +201,8 @@ class TransformerEncoderBloc(nn.Module):
 
 
 class LocalEncoder(nn.Module):
-    def __init__(self, pretrained_encoder : Backbone, quantizer : nn.Module,
-                 head_module : str = "mean", condense_type=None, embed_dim : int = 768, 
+    def __init__(self, pretrained_encoder : Backbone, quantizer : Union[nn.Module, KmeansQuantizer],
+                 head_module : str = "mean", condense_type : str = None, embed_dim : int = 768, 
                  num_heads : int = 8, dropout : float = 0.1, inner_dim : int = 2048, chunking_pre_post_encoding : str = "pre"):
         
         super().__init__()
@@ -288,84 +291,158 @@ class LocalEncoder(nn.Module):
         
         return padding_mask
     
-    def __call__(self, x : torch.Tensor,
-                sample_codebook_temp : float = None, #not used at thge moment
-                padding_mask : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor] :
-        return self.forward(x,
-                sample_codebook_temp, #not used at thge moment
-                padding_mask)
+    def __pre_chunking_encoding(self, x : torch.Tensor, padding_mask : torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
+        max_samples = x.size(-1)
+        
+        x = x.contiguous().view(-1,max_samples) #first reshape as B*chunks, max_samples for backbone compatibility
+        padding_mask = padding_mask.contiguous().view(-1,max_samples) if padding_mask!=None else None
+        
+        x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B*chunks,L,D) L<<max_samples
+        
+        #process padding mask
+        padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L)
+        
+        return x, padding_mask
+    
+    def __post_chunking_encoding(self, x : torch.Tensor, padding_mask : torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor] :
+        
+        B,chunks,max_samples = x.shape
+        
+        x = x.contiguous().view(B,-1) #first reshape as B, chunks*max_samples = track_duration for backbone compatibility
+        padding_mask = padding_mask.contiguous().view(B,-1) if padding_mask!=None else None
+        
+        x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B,L,D) L<<track_duration
+        
+        #reshape and process mask more complicated for post-chunking
+        #we want to preserve the number of chunks --> pad to reshape as (B,chunks,-1,D)
+        T = torch.round(torch.tensor(x.size(1)/chunks)).int() #duration of a chunk to have same number of chunks in output
+        #the total duration of the sequence
+        new_L = chunks*T
+        #pad length to have new_L
+        pad = new_L-x.size(1)
+        
+        if pad>=0:
+        
+            x = torch.cat([x,torch.zeros((x.size(0),pad,x.size(-1)),device=x.device)],dim=1)
+            #reshape as B*chunks, L', D
+            x=x.view(B*chunks,-1,x.size(-1))
+
+            #compute true padding for cases where padding exceeds new chunks size
+            pad_step = pad%T 
+            pad_chunks = pad//T
+
+            #process mask with new padded x
+            padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
+            #process mask with x without the padding -> avoid appending True to mask where it shouldnt
+            #and len of x[:,:-pad] is equivalent to the output length of max_samples
+            padding_mask = self._process_padding_mask(x[:,:-pad_step], padding_mask) #(B*chunks,L-pad)
+            padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L-pad) for easier append of pad mask
+            
+            pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad_step,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
+            pad_step_mask[:,-(pad_chunks+1)]=True #the last 'pad' steps of the last chunk are padded
+            padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,L')
+            if pad_chunks>0:
+                padding_mask[:,-pad_chunks:]=True
+            padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, L'        
+        
+        else :
+            #process mask with original x
+            padding_mask = padding_mask.view(-1,max_samples) #(B*chunks,L)
+            
+            #crop x and reshape as B*chunks,...
+            x = x[:,:pad,:].contiguous().view(B*chunks,-1,x.size(-1)) #(B*chunks,L_enc,dim)
+            
+            #process mask with cropped x
+            padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L_enc)
+            
+            padding_mask=padding_mask.view(B*chunks,-1)
+
+        return x, padding_mask
+    
+    def encode(self, x : torch.Tensor, padding_mask : torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        
+        if self.chunking_pre_post_encoding == "pre":
+            x, padding_mask = self.__pre_chunking_encoding(x, padding_mask)
+            
+        else : #post-chunking
+            x, padding_mask = self.__post_chunking_encoding(x, padding_mask)
+            
+        return x, padding_mask       
     
     def forward(self, x : torch.Tensor,
                 sample_codebook_temp : float = None, #not used at thge moment
                 padding_mask : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:        
+        
         # x is expected to have shape B,chunks,samples
         if x.ndim!=3:
             raise ValueError(f"The input tensor x has not the expected shape of (batch,chunks,samples) but has shape {x.shape}")
         
         B,chunks,max_samples = x.shape
         
-        if self.chunking_pre_post_encoding == "pre":
-            x = x.contiguous().view(-1,max_samples) #first reshape as B*chunks, max_samples for backbone compatibility
-            padding_mask = padding_mask.contiguous().view(-1,max_samples) if padding_mask!=None else None
+        # if self.chunking_pre_post_encoding == "pre":
+        #     x = x.contiguous().view(-1,max_samples) #first reshape as B*chunks, max_samples for backbone compatibility
+        #     padding_mask = padding_mask.contiguous().view(-1,max_samples) if padding_mask!=None else None
             
-            x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B*chunks,L,D) L<<max_samples
+        #     x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B*chunks,L,D) L<<max_samples
             
-            #process padding mask
-            padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L)
+        #     #process padding mask
+        #     padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L)
         
         
-        else : #post-chunking
-            x = x.contiguous().view(B,-1) #first reshape as B, chunks*max_samples = track_duration for backbone compatibility
-            padding_mask = padding_mask.contiguous().view(B,-1) if padding_mask!=None else None
+        # else : #post-chunking
+        #     x = x.contiguous().view(B,-1) #first reshape as B, chunks*max_samples = track_duration for backbone compatibility
+        #     padding_mask = padding_mask.contiguous().view(B,-1) if padding_mask!=None else None
             
-            x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B,L,D) L<<track_duration
+        #     x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B,L,D) L<<track_duration
             
-            #reshape and process mask more complicated for post-chunking
-            #we want to preserve the number of chunks --> pad to reshape as (B,chunks,-1,D)
-            T = torch.round(torch.tensor(x.size(1)/chunks)).int() #duration of a chunk to have same number of chunks in output
-            #the total duration of the sequence
-            new_L = chunks*T
-            #pad length to have new_L
-            pad = new_L-x.size(1)
+        #     #reshape and process mask more complicated for post-chunking
+        #     #we want to preserve the number of chunks --> pad to reshape as (B,chunks,-1,D)
+        #     T = torch.round(torch.tensor(x.size(1)/chunks)).int() #duration of a chunk to have same number of chunks in output
+        #     #the total duration of the sequence
+        #     new_L = chunks*T
+        #     #pad length to have new_L
+        #     pad = new_L-x.size(1)
             
-            if pad>=0:
+        #     if pad>=0:
             
-                x = torch.cat([x,torch.zeros((x.size(0),pad,x.size(-1)),device=x.device)],dim=1)
-                #reshape as B*chunks, L', D
-                x=x.view(B*chunks,-1,x.size(-1))
+        #         x = torch.cat([x,torch.zeros((x.size(0),pad,x.size(-1)),device=x.device)],dim=1)
+        #         #reshape as B*chunks, L', D
+        #         x=x.view(B*chunks,-1,x.size(-1))
 
-                #compute true padding for cases where padding exceeds new chunks size
-                pad_step = pad%T 
-                pad_chunks = pad//T
+        #         #compute true padding for cases where padding exceeds new chunks size
+        #         pad_step = pad%T 
+        #         pad_chunks = pad//T
 
-                #process mask with new padded x
-                padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
-                #process mask with x without the padding -> avoid appending True to mask where it shouldnt
-                #and len of x[:,:-pad] is equivalent to the output length of max_samples
-                padding_mask = self._process_padding_mask(x[:,:-pad_step], padding_mask) #(B*chunks,L-pad)
-                padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L-pad) for easier append of pad mask
+        #         #process mask with new padded x
+        #         padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
+        #         #process mask with x without the padding -> avoid appending True to mask where it shouldnt
+        #         #and len of x[:,:-pad] is equivalent to the output length of max_samples
+        #         padding_mask = self._process_padding_mask(x[:,:-pad_step], padding_mask) #(B*chunks,L-pad)
+        #         padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L-pad) for easier append of pad mask
                 
-                pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad_step,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
-                pad_step_mask[:,-(pad_chunks+1)]=True #the last 'pad' steps of the last chunk are padded
-                padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,L')
-                if pad_chunks>0:
-                    padding_mask[:,-pad_chunks:]=True
-                padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, L'        
+        #         pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad_step,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
+        #         pad_step_mask[:,-(pad_chunks+1)]=True #the last 'pad' steps of the last chunk are padded
+        #         padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,L')
+        #         if pad_chunks>0:
+        #             padding_mask[:,-pad_chunks:]=True
+        #         padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, L'        
             
-            else :
-                #process mask with original x
-                padding_mask = padding_mask.view(-1,max_samples) #(B*chunks,L)
+        #     else :
+        #         #process mask with original x
+        #         padding_mask = padding_mask.view(-1,max_samples) #(B*chunks,L)
                 
-                #crop x and reshape as B*chunks,...
-                x = x[:,:pad,:].contiguous().view(B*chunks,-1,x.size(-1)) #(B*chunks,L_enc,dim)
+        #         #crop x and reshape as B*chunks,...
+        #         x = x[:,:pad,:].contiguous().view(B*chunks,-1,x.size(-1)) #(B*chunks,L_enc,dim)
                 
-                #process mask with cropped x
-                padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L_enc)
+        #         #process mask with cropped x
+        #         padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L_enc)
                 
-                padding_mask=padding_mask.view(B*chunks,-1)
-                
+        #         padding_mask=padding_mask.view(B*chunks,-1)
         
+        #encode chunks   
+        x, padding_mask = self.encode(x, padding_mask)
         
+        #collapse along max_samples dim
         x = self.collapse(x, padding_mask)
     
         # at this point x : (B*chunks,D) 
@@ -397,69 +474,3 @@ class GlobalEncoder(nn.Module):
         x_q, indices, commitment_loss = self.quantizer(x)
         
         return x_q
-        
-
-
-    
-        
-
-        
-"""
-# %%
-from torch.utils.data import DataLoader
-from MusicDataset.MusicDataset_v2 import MusicContainer
-from wav2vec2.wav2vec2_utils import DataCollatorForWav2Vec2, Fetcher
-from transformers import AutoFeatureExtractor, Wav2Vec2ForPreTraining
-        
-# %% Instanciate model and preprocessor
-
-
-feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-base")
-model = Wav2Vec2ForPreTraining.from_pretrained("facebook/wav2vec2-base")
-
-# %% Dataset, DataLoader, Fetcher
-
-root = "/data3/anasynth_nonbp/bujard/data/Examples"
-max_duration=5.0
-sampling_rate=feature_extractor.sampling_rate
-segmentation_strategy="uniform"
-
-#dataset containing all the chunks
-eval_ds = MusicContainer(root, max_duration, sampling_rate, segmentation_strategy)
-
-#DataCollator
-collate_fn = DataCollatorForWav2Vec2(model, feature_extractor, split="eval")
-
-#dataloader
-batch_size=8
-eval_loader=DataLoader(eval_ds,batch_size,collate_fn=collate_fn)
-eval_fetcher=Fetcher(eval_loader)
-#%%
-mha = MultiheadAttention(embed_dim=model.config.output_hidden_size,
-                         num_heads=12,dropout=0.1,
-                         batch_first=True)
-
-
-
-
-
-# %%
-inputs=next(eval_fetcher)
-with torch.no_grad():
-    c = model(inputs.x, output_hidden_states=True).hidden_states[-1]
-print(c.shape)
-
-
-# %%
-mask = torch.ones(size=(c.shape[1],c.shape[1]))
-mask[-1,:]=0 #create mask to mask all timesteps expect last one that attends to all  previous steps
-mask=mask.to(torch.bool)
-mask_per_head = []
-#print(mask)
-with torch.no_grad():
-    y,attn_weights = mha(c,c,c, attn_mask=mask, 
-                         need_weights=True, 
-                         average_attn_weights=False) #average to false to get weights per head
-# %%
-mask = nn.Transformer().generate_square_subsequent_mask(10) #check to understand structure of masking
-"""

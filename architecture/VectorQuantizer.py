@@ -6,10 +6,11 @@ import numpy as np
 #from vector_quantize_pytorch import EuclideanCodebook, CosineSimCodebook, gumbel_sample, identity
 from torch import einsum
 from einops import rearrange
+from typing import Union, Tuple
 
 #vector quantiozer from pre-computed centers with kmeans algorithm
 class KmeansQuantizer(nn.Module):
-    def __init__(self,centers, learnable_codebook, dim=768, restart=False):
+    def __init__(self,centers : Union[np.ndarray,torch.Tensor], learnable_codebook : bool, dim : int = 768, restart : bool = False):
         super().__init__()
         
         if isinstance(centers,np.ndarray) : centers = torch.from_numpy(centers)
@@ -50,7 +51,7 @@ class KmeansQuantizer(nn.Module):
             self.codebook[indexes] = new_codevectors  # Avoids gradient tracking
     
     # TODO : USE CODEBOOK TEMPERATURE FOR SELECTION -> INCREMENT DIVERSITY
-    def forward(self, x : torch.Tensor, sample_codebook_temp=0.):
+    def forward(self, x : torch.Tensor, sample_codebook_temp : float=0.) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
         size=x.size()
         
         if len(size)==3 :

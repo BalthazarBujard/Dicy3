@@ -31,7 +31,9 @@ class Decision(nn.Module):
     def device(self):
         return next(self.parameters()).device
     
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None, src_pad_mask=None, tgt_pad_mask=None):
+    def forward(self, src : torch.Tensor, tgt : torch.Tensor, 
+                src_mask : torch.Tensor = None, tgt_mask : torch.Tensor = None, 
+                src_pad_mask : torch.Tensor = None, tgt_pad_mask : torch.Tensor = None):
         
         if self.decoder_only:
             memory = src
