@@ -392,7 +392,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     #compute entropy of labels = search for -> diversity
     prYellow("Computing statistics...")
     lengths = compute_consecutive_lengths(query)
-    mean_len, median_len = np.mean(lengths), np.median(lengths)
+    mean_len, median_len, max_len = np.mean(lengths), np.median(lengths), max(lengths)
     
     counts = np.bincount(search_for,minlength=model.codebook_size)
     probs = counts/sum(counts)
@@ -476,7 +476,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         idx = save_file(save_dir,"search_for",f"{mix_name}",search_for,"txt",orig_rate=None,tgt_rate=None)
         
         write_info(model,memory_path, src_path, mix_name, k, with_coupling, 
-                   remove, accuracy, mean_len,median_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
+                   remove, accuracy, mean_len, median_len, max_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
                    decoding_type=decoding_type, temperature=temperature)
     
     return Munch(memory = memory,
@@ -522,7 +522,9 @@ def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate):
     
     return idx
 
-def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with_coupling, remove, accuracy, mean_len, median_len, entropy, w_size, save_dir, decoding_type, temperature):
+def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with_coupling, remove,
+               accuracy, mean_len, median_len, max_len, entropy, 
+               w_size, save_dir, decoding_type, temperature):
     # Ensure the info directory exists
     info_path = f"{save_dir}/info.txt"
     os.makedirs(os.path.dirname(info_path), exist_ok=True)
@@ -540,7 +542,7 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with
     f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, temperature = {temperature}\n"
 
     f"\tAnalysis :\n"
-    f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, entropy = {entropy:.2f} [Bits]\n\n")
+    f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, max_len = {max_len}, entropy = {entropy:.2f} [Bits]\n\n")
     
     # Open the file in append mode and write the content
     with open(info_path, 'a') as file:
