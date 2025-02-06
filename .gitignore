@@ -4,6 +4,8 @@
 
 *.ipynb
 
+*.wav
+
 runs
 
 output
@@ -15,3 +17,5 @@ evaluation
 demo
 
 test_exo
+
+exemples_generation
