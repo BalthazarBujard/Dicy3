@@ -925,9 +925,9 @@ class MusicCouplingContainer(Dataset):
 
 
 class Fetcher:
-    def __init__(self, loader):
+    def __init__(self, loader, device=None):
         self.loader=loader
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device==None else device
     
     def _fetch_inputs(self)-> Union[torch.Tensor, dict]:
         #method to fetch next set of inputs
@@ -944,7 +944,7 @@ class Fetcher:
     def __len__(self):
         return len(self.loader)
     
-    def __next__(self):
+    def __next__(self) -> Munch:
         inputs = self._fetch_inputs()
         
         #pass inputs to cuda and as a Munch

@@ -4,6 +4,8 @@
 
 *.ipynb
 
+*.wav
+
 runs
 
 output
