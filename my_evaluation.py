@@ -13,7 +13,7 @@ from top_k_validity import compute_similarity
 from tqdm import tqdm
 import numpy as np 
 from pathlib import Path
-from typing import Union, List
+from typing import Union
 from librosa import load
 from munch import Munch
 import glob
@@ -47,17 +47,17 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
             inputs = next(eval_fetcher)
             
             if type(model)==Seq2SeqCoupling:
-                src, tgt, src_pad_mask, tgt_pad_mask, _ = inputs.values()
+                src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices = inputs.values()
                 #compute output
                 logits, tgt, tgt_idx, _ = model.forward(src, tgt, src_pad_mask, tgt_pad_mask)
                 
             elif type(model)==Seq2SeqBase: #for autocompletion
-                src, src_pad_mask, _, _ = inputs.values() 
+                src, src_pad_mask, src_mask_indices, label = inputs.values() 
                 #compute output
                 logits, tgt, tgt_idx, _ = model.forward(src, src_pad_mask)
             
             #encoded inputs
-            encoded_src = model.encoder.forward(src, padding_mask = src_pad_mask[0])[1] #only take cb indexes to compute entropy
+            encoded_src = model.encoder(src, padding_mask = src_pad_mask[0])[1] #only take cb indexes to compute entropy
                     
             tgt_out = tgt_idx[:,1:] #ground truth (B,T)
             
@@ -111,14 +111,10 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
                  codebook_usage = {"mean":codebook_usage,"std":codebook_usage_std},
                  topK_sim = {"mean":cosine_sim,"std":cosine_sim_std})
 
-def generate_eval_examples(tracks_list : List[List], 
-                           model : Seq2SeqCoupling, 
-                           k : int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool, 
-                           track_duration : float, chunk_duration : float, 
-                           segmentation : str, pre_segmentation : str, 
-                           crossfade_time : float, max_duration : float, 
-                           save_dir : Path, 
-                           smaller : bool = False, random_subset : bool = True, remove : bool = False, batch_size : int = 8):
+def generate_eval_examples(tracks_list,model,k,with_coupling,decoding_type,temperature,force_coupling,
+                      track_duration,chunk_duration,
+                      segmentation,pre_segmentation,crossfade_time,max_duration,
+                      save_dir,smaller=False,random_subset=True, remove=False, batch_size=8):
     
     #tracks list is like [[t11,t12,...],...,[tm1,tm2,..,tmn]]
     bar = tqdm(range(len(tracks_list)))
@@ -181,9 +177,8 @@ def parse_args():
     parser.add_argument("--max_duration",type=float,default=60)
     parser.add_argument("--smaller",action='store_true')
     parser.add_argument("--crossfade_time",type=float,default=0.05)
-    parser.add_argument("--apa_emb",type=str,choices=["CLAP","L-CLAP"], default = "CLAP")
+    parser.add_argument("--apa_emb",type=str,choices=["CLAP","L-CLAP"])
     parser.add_argument("--fad_inf",action="store_true")
-    #here you can specify "memory" or "original" for baseline evaluation
     parser.add_argument("--quality_tgt_folder",default=None, help="target folder ofr generated samples to evaluate audio quality of the model") 
     parser.add_argument("--apa_tgt_folder",default=None, help="target folder to generated to evaluate apa")
     parser.add_argument("--similarity_tgt_folder",default=None, help="target folder to evaluate music similarity")
@@ -208,16 +203,13 @@ def main():
         model_ckps=args.model_ckp #with nargs=* --> always as list
 
 
-    if args.k>=1: 
+    if args.k>=1: #portion of vocab size
         k = int(args.k)
-    else : k = args.k #total probability
     
     pre_segmentation = "uniform" if not args.sliding else "sliding"
     
     for model_ckp in model_ckps:
         prYellow(os.path.basename(model_ckp))        
-        
-        #extract data
         
         if args.data == 'canonne':
             duos=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{args.split}"
@@ -236,7 +228,6 @@ def main():
         #load model only for generation or model eval
         if 'model' in args.task or args.generate:
             model,params,_ = load_model_checkpoint(model_ckp)
-            model.has_masking=False #during evaluation model doesnt mask time indices
             model.to(device)
             
             #extract segmentation params
@@ -447,11 +438,9 @@ def main():
             mean_sim = np.mean(sims)
             std_sim = np.std(sims)
             median_sim = np.median(sims)
-            #percentile90 = np.percentile(np.abs(sims),90)
-            print(mean_sim,std_sim,median_sim)#,percentile90)
-            print(sims)
+            print(mean_sim,std_sim,median_sim)
             #save to file
-            save_to_file({"music_similarity (mean, std, median, 90th percentile)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
+            save_to_file({"music_similarity (mean, std, median)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
             
             
     

@@ -477,7 +477,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         
         write_info(model,memory_path, src_path, mix_name, k, with_coupling, 
                    remove, accuracy, mean_len, median_len, max_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
-                   decoding_type=decoding_type, force_coupling=force_coupling, temperature=temperature)
+                   decoding_type=decoding_type, temperature=temperature)
     
     return Munch(memory = memory,
                  source = source,
@@ -524,7 +524,7 @@ def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate):
 
 def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with_coupling, remove,
                accuracy, mean_len, median_len, max_len, entropy, 
-               w_size, save_dir, decoding_type, force_coupling, temperature):
+               w_size, save_dir, decoding_type, temperature):
     # Ensure the info directory exists
     info_path = f"{save_dir}/info.txt"
     os.makedirs(os.path.dirname(info_path), exist_ok=True)
@@ -539,7 +539,7 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with
     f"\tSources:\n"
     + "\n".join(f"\t - {path}" for path in source_paths) + "\n"
     f"\tParams :\n"
-    f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, force_coupling = {force_coupling}, temperature = {temperature}\n"
+    f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, temperature = {temperature}\n"
 
     f"\tAnalysis :\n"
     f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, max_len = {max_len}, entropy = {entropy:.2f} [Bits]\n\n")

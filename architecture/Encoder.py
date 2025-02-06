@@ -7,7 +7,7 @@ import transformers, fairseq
 import math
 from utils.utils import *
 from typing import Union, List, Tuple
-from VectorQuantizer import KmeansQuantizer
+from .VectorQuantizer import KmeansQuantizer
 
 # TODO : AJOUTER UN ARGUMENT POUR LE CAS OU ON FERAIT DU PRETRAIN DU BACKBONE, DANS CE CAS L'ARGUMENT MASK DOIT ETRE A TRUE MAIS DANS LE CAS GENERAL DE NOTRE APPLICATION 
 # ON NE PREVOIT PAS DE FAIRE D EPRE-TRAIN MAIS SIMPLEMENT DE L'ADAPTATION
@@ -379,8 +379,68 @@ class LocalEncoder(nn.Module):
         
         B,chunks,max_samples = x.shape
         
+        # if self.chunking_pre_post_encoding == "pre":
+        #     x = x.contiguous().view(-1,max_samples) #first reshape as B*chunks, max_samples for backbone compatibility
+        #     padding_mask = padding_mask.contiguous().view(-1,max_samples) if padding_mask!=None else None
+            
+        #     x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B*chunks,L,D) L<<max_samples
+            
+        #     #process padding mask
+        #     padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L)
+        
+        
+        # else : #post-chunking
+        #     x = x.contiguous().view(B,-1) #first reshape as B, chunks*max_samples = track_duration for backbone compatibility
+        #     padding_mask = padding_mask.contiguous().view(B,-1) if padding_mask!=None else None
+            
+        #     x = self.encoder(x, padding_mask) #contextualized representations from pretrained_backbone. (B,L,D) L<<track_duration
+            
+        #     #reshape and process mask more complicated for post-chunking
+        #     #we want to preserve the number of chunks --> pad to reshape as (B,chunks,-1,D)
+        #     T = torch.round(torch.tensor(x.size(1)/chunks)).int() #duration of a chunk to have same number of chunks in output
+        #     #the total duration of the sequence
+        #     new_L = chunks*T
+        #     #pad length to have new_L
+        #     pad = new_L-x.size(1)
+            
+        #     if pad>=0:
+            
+        #         x = torch.cat([x,torch.zeros((x.size(0),pad,x.size(-1)),device=x.device)],dim=1)
+        #         #reshape as B*chunks, L', D
+        #         x=x.view(B*chunks,-1,x.size(-1))
+
+        #         #compute true padding for cases where padding exceeds new chunks size
+        #         pad_step = pad%T 
+        #         pad_chunks = pad//T
+
+        #         #process mask with new padded x
+        #         padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,max_samples)
+        #         #process mask with x without the padding -> avoid appending True to mask where it shouldnt
+        #         #and len of x[:,:-pad] is equivalent to the output length of max_samples
+        #         padding_mask = self._process_padding_mask(x[:,:-pad_step], padding_mask) #(B*chunks,L-pad)
+        #         padding_mask = padding_mask.view(B,chunks,-1) #reshape as (B,chunks,L-pad) for easier append of pad mask
+                
+        #         pad_step_mask = torch.zeros(padding_mask.shape[:2]+(pad_step,),device=padding_mask.device, dtype=torch.bool) #(B,chunks,pad_len) init as False
+        #         pad_step_mask[:,-(pad_chunks+1)]=True #the last 'pad' steps of the last chunk are padded
+        #         padding_mask = torch.cat([padding_mask,pad_step_mask],dim=-1) #(B,chunks,L')
+        #         if pad_chunks>0:
+        #             padding_mask[:,-pad_chunks:]=True
+        #         padding_mask = padding_mask.view(B*chunks,-1) #final reshape as B*chunks, L'        
+            
+        #     else :
+        #         #process mask with original x
+        #         padding_mask = padding_mask.view(-1,max_samples) #(B*chunks,L)
+                
+        #         #crop x and reshape as B*chunks,...
+        #         x = x[:,:pad,:].contiguous().view(B*chunks,-1,x.size(-1)) #(B*chunks,L_enc,dim)
+                
+        #         #process mask with cropped x
+        #         padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L_enc)
+                
+        #         padding_mask=padding_mask.view(B*chunks,-1)
+        
         #encode chunks   
-        x, padding_mask = self.encode(x, padding_mask) #(B*chunks,L_enc,dim)
+        x, padding_mask = self.encode(x, padding_mask)
         
         #collapse along max_samples dim
         x = self.collapse(x, padding_mask)

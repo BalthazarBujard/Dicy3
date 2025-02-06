@@ -314,8 +314,7 @@ class Seq2SeqBase(nn.Module):
         return tgt, tgt_idx
     
     # beam search transition function : computes the probabilities over the state space given an input sequence of states 
-    def __beam_search_transition_fn(self, 
-                                    candidates: List[List[Candidate]], 
+    def __beam_search_transition_fn(self,candidates: List[List[Candidate]], 
                                     memory : torch.Tensor, 
                                     memory_mask : torch.Tensor,
                                     temperature : float) -> torch.Tensor:
@@ -364,7 +363,7 @@ class Seq2SeqBase(nn.Module):
             
         return probs
     
-    def __beam_search_custom_fn(self,candidate:Candidate):
+    def __beam_search_custom_fn(self,candidate:Candidate, entropy_weight : float):
         probs = torch.tensor(candidate.compute_prob())
         llh=torch.log(probs)/(candidate.effective_length**0.75)
         
@@ -380,9 +379,9 @@ class Seq2SeqBase(nn.Module):
         eos = self.special_tokens_idx['eos'].item()
         
         trans_fn_args = {'memory':memory, 'memory_mask':memory_pad_mask,"temperature":temperature}
-        #score_fn_args = {'entropy_weight':None} #TODO : REMOVE THIS SINCE WE USE TEMPERATURE NOW
+        score_fn_args = {'entropy_weight':None} #TODO : REMOVE THIS SINCE WE USE TEMPERATURE NOW
         
-        beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn)
+        beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn, score_fn_args=score_fn_args)
 
         best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
         
@@ -406,20 +405,6 @@ class Seq2SeqBase(nn.Module):
         else : raise ValueError(f"Wrong 'decoding_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
         
         return tgt_out, tgt_idx
-    
-    #encode input sequence --> assign labels (codebook index,..)
-    @torch.no_grad
-    def encode(self, src : torch.Tensor, src_pad_masks : List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: #needs both pad masks
-        z_src, src_idx, codebook_loss = self.encoder.forward(src, padding_mask = src_pad_masks[0])        
-        
-        if self.use_special_tokens:
-            z_src, src_idx, src_pad_mask = self._apply_special_tokens(z_src,src_idx, src_pad_masks[1])
-        
-        else : 
-            #if not apply special tokens then src_pad_mask stays the same
-            src_pad_mask = src_pad_masks[1]
-        
-        return z_src, src_idx, src_pad_mask
         
     
     
@@ -505,6 +490,21 @@ class Seq2SeqCoupling(Seq2SeqBase):
         out = self.decision(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) #already logits over vocab_size
         
         return out, tgt, tgt_idx, codebook_loss #return predictions and encoded target sequence for loss computing
+    
+    #TODO : MOVE ENCODE TO BASE CLASS
+    #encode input sequence --> assign labels (codebook index,..)
+    @torch.no_grad
+    def encode(self, src : torch.Tensor, src_pad_masks : List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: #needs both pad masks
+        z_src, src_idx, codebook_loss = self.encoder.forward(src, padding_mask = src_pad_masks[0])        
+        
+        if self.use_special_tokens:
+            z_src, src_idx, src_pad_mask = self._apply_special_tokens(z_src,src_idx, src_pad_masks[1])
+        
+        else : 
+            #if not apply special tokens then src_pad_mask stays the same
+            src_pad_mask = src_pad_masks[1]
+        
+        return z_src, src_idx, src_pad_mask
     
     #generate sequence of labels to "couple" the input sequence of labels (memory)
     @torch.no_grad
