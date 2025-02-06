@@ -38,7 +38,8 @@ def generate_example(model,memory,src, track_duration, chunk_duration, segmentat
 def generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
                       with_coupling, remove, k, decoding_type, temperature, force_coupling, 
                       fade_time, 
-                      num_examples, data, save_dir, batch_size, from_subset=False, smaller=False, max_duration=None,device=None):
+                      num_examples, data, save_dir, batch_size, 
+                      from_subset=False, smaller=False, max_duration=None, device=None, mix_channels=2):
     
     if device == None : device = lock_gpu[0][0]
     
@@ -86,7 +87,7 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
             generate_example(model, memory, src, 
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
-                             fade_time,save_dir,smaller,batch_size,max_duration,device=device)
+                             fade_time,save_dir,smaller,batch_size,max_duration,device=device,mix_channels=mix_channels)
 
             # output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
             #                 track_duration,chunk_duration,
@@ -152,6 +153,7 @@ if __name__=='__main__':
     parser.add_argument('--memory')
     parser.add_argument('--source',nargs='*')
     parser.add_argument("--save_dir")
+    parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
     args = parser.parse_args()
     
     # If a file with checkpoint paths is provided, read it and add to model_ckp
@@ -193,7 +195,7 @@ if __name__=='__main__':
                             batch_size=args.batch_size,
                             smaller=args.smaller,
                             max_duration=args.max_duration,
-                            from_subset=args.from_subset, device=DEVICE)
+                            from_subset=args.from_subset, device=DEVICE, mix_channels=args.mix_channels)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
@@ -203,6 +205,7 @@ if __name__=='__main__':
                             args.smaller,
                             args.batch_size,
                             max_duration=args.max_duration,
-                            device=DEVICE)
+                            device=DEVICE,
+                            mix_channels=args.mix_channels)
             
         else : raise ValueError("Either specify 'data' or give a source and memory path")
