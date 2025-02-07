@@ -20,6 +20,7 @@ import glob
 import argparse
 from generate import generate_example
 import datetime
+from itertools import permutations
 
 
     
@@ -30,7 +31,6 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
     model.eval()
     acc=0
     diversity = 0 #predicted tokens entropy
-    codebook_perplexity = 0 #entropy of encoded inputs
     cosine_sim = 0
     
     accs = []
@@ -125,32 +125,38 @@ def generate_eval_examples(tracks_list : List[List],
     
     for tracks in tracks_list: 
         
-        #TODO : FOR BETTER EVALUATION PICK EVERY MEMORY IN LIST
+        #TODO : FOR BETTER EVALUATION PICK EVERY DUO OF MEMORY/GUIDE IN TRACK LIST
+        
+        
         
         #pick a source and memory
-        memory = np.random.choice(tracks)
-        srcs = [t for t in tracks if t!=memory]
-        print(srcs)
-        if random_subset:
-            src = np.random.choice(srcs, size = np.random.randint(1,len(srcs)),replace=False).tolist() if len(srcs)>1 else srcs #pick random subset of mix 
-        else : src = srcs
-        print(src)
+        # memory = np.random.choice(tracks)
+        # srcs = [t for t in tracks if t!=memory]
+        # print(srcs)
+        # if random_subset:
+        #     src = np.random.choice(srcs, size = np.random.randint(1,len(srcs)),replace=False).tolist() if len(srcs)>1 else srcs #pick random subset of mix 
+        # else : src = srcs
+        # print(src)
         
-        if smaller: #find small chunk in track
-            y,sr = load(src[np.random.randint(0,len(src))],sr=None)
-            t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
-            timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
-        else : timestamps=[None,None]
+        duos = list(permutations(tracks,2))
         
-        #generate
-        generate_example(
-            model,
-            memory, src,
-            track_duration, chunk_duration, segmentation, pre_segmentation,
-            with_coupling, remove, k, decoding_type, temperature, force_coupling,
-            crossfade_time, save_dir, smaller, batch_size,
-            max_duration, device=device, tgt_sampling_rates={'solo':48000,'mix':48000}, mix_channels=1
-        )
+        for memory, src in duos:
+        
+            if smaller: #find small chunk in track
+                y,sr = load(src[np.random.randint(0,len(src))],sr=None)
+                t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
+                timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
+            else : timestamps=[None,None]
+            
+            #generate
+            generate_example(
+                model,
+                memory, src,
+                track_duration, chunk_duration, segmentation, pre_segmentation,
+                with_coupling, remove, k, decoding_type, temperature, force_coupling,
+                crossfade_time, save_dir, smaller, batch_size,
+                max_duration, device=device, tgt_sampling_rates={'solo':48000,'mix':48000}, mix_channels=1
+            )
         
         
         bar.update(1)
