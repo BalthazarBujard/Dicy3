@@ -291,6 +291,7 @@ class LocalEncoder(nn.Module):
         
         return padding_mask
     
+    #TODO : REMOVE THE "if padding_maks!=None..." BY ASSURING THAT A PADDING MASK IS GIVEN AS ARGUMENT OR IF ITS NONE THEN CREATE A PADDING MASK WITH FULL ZEROS
     def __pre_chunking_encoding(self, x : torch.Tensor, padding_mask : torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
         max_samples = x.size(-1)
         
@@ -304,6 +305,7 @@ class LocalEncoder(nn.Module):
         
         return x, padding_mask
     
+    #TODO : REMOVE THE "if padding_maks!=None..." BY ASSURING THAT A PADDING MASK IS GIVEN AS ARGUMENT OR IF ITS NONE THEN CREATE A PADDING MASK WITH FULL ZEROS
     def __post_chunking_encoding(self, x : torch.Tensor, padding_mask : torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor] :
         
         B,chunks,max_samples = x.shape
@@ -347,7 +349,7 @@ class LocalEncoder(nn.Module):
         
         else :
             #process mask with original x
-            padding_mask = padding_mask.view(-1,max_samples) #(B*chunks,L)
+            padding_mask = padding_mask.view(-1,max_samples) if padding_mask!=None else None #(B*chunks,L)
             
             #crop x and reshape as B*chunks,...
             x = x[:,:pad,:].contiguous().view(B*chunks,-1,x.size(-1)) #(B*chunks,L_enc,dim)
