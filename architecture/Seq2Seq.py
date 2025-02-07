@@ -361,18 +361,24 @@ class Seq2SeqBase(nn.Module):
         probs = torch.softmax(logits,dim=-1)[:,:,-1,:] #(B,beam_width,vocab_size)
         
         #print(probs.shape)
-            
+        #print(probs)
+        print(torch.topk(probs,k=5))
+        
         return probs
     
-    def __beam_search_custom_fn(self,candidate:Candidate):
+    def __beam_search_custom_fn(self,candidate:Candidate,entropy_weight:float=0.):
         probs = torch.tensor(candidate.compute_prob())
         llh=torch.log(probs)/(candidate.effective_length**0.75)
         
-        return llh
+        states = candidate.states
+        states_count = torch.bincount(torch.tensor(states[:candidate.effective_length]))
+        H = entropy(states_count/sum(states_count))/torch.log(torch.tensor(len(states_count)+1e-9))
+        
+        return llh + entropy_weight*H
 
     
     def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, 
-                              k : int, max_len : int, temperature : float) -> Tuple[torch.Tensor, torch.Tensor]:
+                              k : int, max_len : int, temperature : float, entropy_weight : Optional[float] = 0) -> Tuple[torch.Tensor, torch.Tensor]:
         
         B = memory.size(0)
         
@@ -380,14 +386,17 @@ class Seq2SeqBase(nn.Module):
         eos = self.special_tokens_idx['eos'].item()
         
         trans_fn_args = {'memory':memory, 'memory_mask':memory_pad_mask,"temperature":temperature}
-        #score_fn_args = {'entropy_weight':None} #TODO : REMOVE THIS SINCE WE USE TEMPERATURE NOW
+        score_fn_args = {'entropy_weight':entropy_weight} 
         
-        beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn)
+        beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn,score_fn_args=score_fn_args)
 
-        best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
-        
+        best_candidates = beamsearch(x_init, k, max_len,nbest=3) #(B,nbest) with nbest = 1
+        for batch_candidates in best_candidates:
+            for nbest_candidate in batch_candidates:
+                print(nbest_candidate)
+        best_candidates = [[best_candidate for best_candidate in nbest_candidates[0:1]] for nbest_candidates in best_candidates]
         #convert candidates to states and embeddings
-        tgt_idx = torch.tensor([[c.states for c in nbest_candidates] for nbest_candidates in best_candidates],device=self.device).squeeze(1) #remove extra dimension
+        tgt_idx = torch.tensor([[c.states for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1) #remove extra dimension
         tgt = self.from_indexes_to_embeddings(tgt_idx)
         
         return tgt, tgt_idx
@@ -395,13 +404,13 @@ class Seq2SeqBase(nn.Module):
     
     def decode(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor,
                k:int, max_len : int, decoding_type : str, temperature : float = 1,
-               tgt_gt : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
+               tgt_gt : torch.Tensor = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor]:
         
         if decoding_type == "greedy":
             tgt_out, tgt_idx = self._greedy_decoding(memory, memory_pad_mask, k, max_len, tgt_gt)
             
         elif decoding_type=="beam":
-            tgt_out, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, temperature)
+            tgt_out, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, temperature, entropy_weight)
         
         else : raise ValueError(f"Wrong 'decoding_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
         
@@ -488,20 +497,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
         #apply source masking
         if self.has_masking:
             src, src_mask = self._apply_masking(src, mask_time_indices, tgt_input)
-            # #take sos and eos into account
-            # mask_time_indices = torch.cat([torch.tensor([False],device=self.device).expand(src.size(0),1),
-            #                                mask_time_indices,
-            #                                torch.tensor([False],device=self.device).expand(src.size(0),1)],dim=1)
             
-            # src[mask_time_indices]=self.spec_mask_embed
-            
-            # T = src.size(1) if not self.decision.decoder_only else tgt_input.size(1) #self attention if decoder only and cross atention for decodr only
-            # src_mask = torch.repeat_interleave(mask_time_indices.unsqueeze(1),repeats=T,dim=1) #(B,T,S)
-            # #we need to repeat for every head of each example i.e. example 1 -> head1,head2,...,headN, then example 2 --> repeat on batch dimension
-            # src_mask = torch.repeat_interleave(src_mask,repeats = self.decision.heads,dim=0) #(B*heads,T,S)
-            
-        
-        
         out = self.decision(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) #already logits over vocab_size
         
         return out, tgt, tgt_idx, codebook_loss #return predictions and encoded target sequence for loss computing
@@ -510,7 +506,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
     @torch.no_grad
     def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
                  k:int, max_len : int, decoding_type : str, temperature : float, 
-                 tgt_gt : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]: 
+                 tgt_gt : Optional[torch.Tensor] = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor]: 
         
         src = encoded_src
         
@@ -519,7 +515,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         memory = self.decision.encode(src,src_mask=None,src_pad_mask=src_pad_mask) #encode src once -> pass through Transformer encoder if enc-dec else will be = src
         
-        tgt, tgt_idx = self.decode(memory, src_pad_mask, k, max_len, decoding_type, temperature, tgt_gt)
+        tgt, tgt_idx = self.decode(memory, src_pad_mask, k, max_len, decoding_type, temperature, tgt_gt, entropy_weight)
         
         return tgt, tgt_idx 
     
