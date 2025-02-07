@@ -362,7 +362,7 @@ class Seq2SeqBase(nn.Module):
         
         #print(probs.shape)
         #print(probs)
-        print(torch.topk(probs,k=5))
+        #print(torch.topk(probs,k=5))
         
         return probs
     
@@ -390,11 +390,11 @@ class Seq2SeqBase(nn.Module):
         
         beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn,score_fn_args=score_fn_args)
 
-        best_candidates = beamsearch(x_init, k, max_len,nbest=3) #(B,nbest) with nbest = 1
-        for batch_candidates in best_candidates:
-            for nbest_candidate in batch_candidates:
-                print(nbest_candidate)
-        best_candidates = [[best_candidate for best_candidate in nbest_candidates[0:1]] for nbest_candidates in best_candidates]
+        best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
+        # for batch_candidates in best_candidates:
+        #     for nbest_candidate in batch_candidates:
+        #         print(nbest_candidate)
+        # best_candidates = [[best_candidate for best_candidate in nbest_candidates[0:1]] for nbest_candidates in best_candidates]
         #convert candidates to states and embeddings
         tgt_idx = torch.tensor([[c.states for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1) #remove extra dimension
         tgt = self.from_indexes_to_embeddings(tgt_idx)
