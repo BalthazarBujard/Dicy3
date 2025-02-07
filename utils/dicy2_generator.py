@@ -119,6 +119,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                       with_coupling : bool, k : int, decoding_type : str,
                       generator : Dicy2Generator,
                       temperature : float,
+                      entropy_weight : float,
                       batch_size : int,
                       tgt_gts : list[list] = None):
 
@@ -172,7 +173,8 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                                        max_len=len(encoded_src[0]),
                                        decoding_type=decoding_type,
                                        temperature=temperature,
-                                       tgt_gt=tgt_gt)[1] #(B,T)
+                                       tgt_gt=tgt_gt,
+                                       entropy_weight=entropy_weight)[1] #(B,T)
             
             #print("pred :",tgt_idx)
             #print("GT:",tgt_gt)
@@ -323,6 +325,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                       k:int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool,
                       max_track_duration:float,max_chunk_duration:float,
                       track_segmentation:str, chunk_segmentation:str,
+                      entropy_weight : float = 0,
                       batch_size : int = 8,
                       concat_fade_time=0.04, remove=False, max_backtrack = None,
                       device=None,
@@ -331,9 +334,6 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                       save_files=True,
                       save_dir='output'):
     
-    #if track_segmentation=='sliding':
-        #raise NotImplementedError("No concatenation of output for track chunking with sliding window...")
-
     if chunk_segmentation=='onset':
         raise ValueError("Concatenation algorithm not compatible with 'onset' segmentation")
     
@@ -367,7 +367,9 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     
     prYellow("Generating reponse...")
     tgt_gts = labels if force_coupling else None
-    queries, searches_for, accuracy = generate_response(src_ds, model, chunk_segmentation, with_coupling, k, decoding_type, generator, temperature, batch_size, tgt_gts)
+    queries, searches_for, accuracy = generate_response(src_ds, model, chunk_segmentation, 
+                                                        with_coupling, k, decoding_type, generator, temperature, entropy_weight,
+                                                        batch_size, tgt_gts)
     source = src_ds.native_track
 
     prYellow("Concatenate response...")
@@ -475,9 +477,9 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         save_file(save_dir,"query",f"{mix_name}",query,"txt",orig_rate=None,tgt_rate=None)
         idx = save_file(save_dir,"search_for",f"{mix_name}",search_for,"txt",orig_rate=None,tgt_rate=None)
         
-        write_info(model,memory_path, src_path, mix_name, k, with_coupling, 
+        write_info(model,memory_path, src_path, mix_name, idx, k, with_coupling, 
                    remove, accuracy, mean_len, median_len, max_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
-                   decoding_type=decoding_type, force_coupling=force_coupling, temperature=temperature)
+                   decoding_type=decoding_type, force_coupling=force_coupling, temperature=temperature,entropy_weight=entropy_weight)
     
     return Munch(memory = memory,
                  source = source,
@@ -522,9 +524,9 @@ def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate):
     
     return idx
 
-def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with_coupling, remove,
+def write_info(model: Seq2SeqBase, memory_path, source_paths, mix_name, idx, top_k, with_coupling, remove,
                accuracy, mean_len, median_len, max_len, entropy, 
-               w_size, save_dir, decoding_type, force_coupling, temperature):
+               w_size, save_dir, decoding_type, force_coupling, temperature, entropy_weight):
     # Ensure the info directory exists
     info_path = f"{save_dir}/info.txt"
     os.makedirs(os.path.dirname(info_path), exist_ok=True)
@@ -534,12 +536,12 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, index, top_k, with
     # Prepare the content to write
     
     content = (
-    f"Mix : {index} :\n"
+    f"Mix : {mix_name}_{idx} :\n"
     f"\tMemory: {memory_path}\n"
     f"\tSources:\n"
     + "\n".join(f"\t - {path}" for path in source_paths) + "\n"
     f"\tParams :\n"
-    f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, force_coupling = {force_coupling}, temperature = {temperature}\n"
+    f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, force_coupling = {force_coupling}, temperature = {temperature}, entropy_weight = {entropy_weight}\n"
 
     f"\tAnalysis :\n"
     f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, max_len = {max_len}, entropy = {entropy:.2f} [Bits]\n\n")
