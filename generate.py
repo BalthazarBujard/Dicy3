@@ -14,8 +14,9 @@ import glob
 def generate_example(model,memory,src, track_duration, chunk_duration, segmentation, pre_segmentation,
                      with_coupling,remove,k, decoding_type, temperature, force_coupling,
                      fade_time,save_dir,smaller, batch_size,max_duration=None, device=None,
-                     tgt_sampling_rates={'solo':None,'mix':None},
-                     mix_channels = 2):
+                     tgt_sampling_rates : dict = {'solo':None,'mix':None},
+                     mix_channels : int = 2,
+                     entropy_weight : float = 0):
     
     if device == None : device = lock_gpu[0][0]
     
@@ -25,21 +26,25 @@ def generate_example(model,memory,src, track_duration, chunk_duration, segmentat
         timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
     else : timestamps=[None,None]
     
-    output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
-                      track_duration,chunk_duration,track_segmentation=pre_segmentation,
-                            chunk_segmentation=segmentation,
-                            batch_size=batch_size,
-                            concat_fade_time=fade_time,
-                            remove=remove, timestamps=timestamps,
-                            save_dir=save_dir, max_output_duration = max_duration,
-                            tgt_sampling_rates=tgt_sampling_rates, mix_channels=mix_channels,
-                            device=device)
+    output = generate(
+                    memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
+                    track_duration,chunk_duration,
+                    entropy_weight=entropy_weight,
+                    track_segmentation=pre_segmentation,
+                    chunk_segmentation=segmentation,
+                    batch_size=batch_size,
+                    concat_fade_time=fade_time,
+                    remove=remove, timestamps=timestamps,
+                    save_dir=save_dir, max_output_duration = max_duration,
+                    tgt_sampling_rates=tgt_sampling_rates, mix_channels=mix_channels,
+                    device=device
+                    )
 
 def generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
                       with_coupling, remove, k, decoding_type, temperature, force_coupling, 
                       fade_time, 
                       num_examples, data, save_dir, batch_size, 
-                      from_subset=False, smaller=False, max_duration=None, device=None, mix_channels=2):
+                      from_subset=False, smaller=False, max_duration=None, device=None, mix_channels=2, entropy_weight : float = 0.):
     
     if device == None : device = lock_gpu[0][0]
     
@@ -87,17 +92,8 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
             generate_example(model, memory, src, 
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
-                             fade_time,save_dir,smaller,batch_size,max_duration,device=device,mix_channels=mix_channels)
-
-            # output = generate(memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
-            #                 track_duration,chunk_duration,
-            #                 track_segmentation=segmentation,
-            #                 chunk_segmentation=pre_segmentation,
-            #                 batch_size=batch_size,
-            #                 concat_fade_time=fade_time,
-            #                 remove=remove,
-            #                 save_dir=save_dir,
-            #                 device=DEVICE)
+                             fade_time,save_dir,smaller,batch_size,max_duration,device=device,
+                             mix_channels=mix_channels,entropy_weight=entropy_weight)
         
 
     elif data == 'moises':
@@ -120,19 +116,9 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
                              fade_time,save_dir,smaller,batch_size,max_duration,device=device)
 
-            # output = generate(memory,src,model,k,with_coupling, decoding_type, temperature, force_coupling,
-            #                 track_duration,chunk_duration,track_segmentation=pre_segmentation,
-            #                 chunk_segmentation=segmentation,
-            #                 batch_size=batch_size,
-            #                 concat_fade_time=fade_time,
-            #                 remove=remove,
-            #                 save_dir=save_dir,
-            #                 device=DEVICE)
-
 
 if __name__=='__main__':
     
-    #ckp = "runs/coupling/All_res0.5s_len30.0s_mix2stem_8.pt"
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_ckp",type=str,nargs="*")
     parser.add_argument("--model_ckps_folder",type=str)
@@ -141,6 +127,7 @@ if __name__=='__main__':
     parser.add_argument("--remove",action='store_true')
     parser.add_argument("-decoding","--decoding_type", type = str, choices=['greedy','beam'])
     parser.add_argument("--temperature", type = float, default=1.)
+    parser.add_argument("--entropy_weight",type=float,default=0.)
     parser.add_argument("--k",type=float,default=5)
     parser.add_argument("--force_coupling", action = 'store_true')
     parser.add_argument('--fade_time',type=float,default=0.05)
@@ -195,7 +182,7 @@ if __name__=='__main__':
                             batch_size=args.batch_size,
                             smaller=args.smaller,
                             max_duration=args.max_duration,
-                            from_subset=args.from_subset, device=DEVICE, mix_channels=args.mix_channels)
+                            from_subset=args.from_subset, device=DEVICE, mix_channels=args.mix_channels, entropy_weight = args.entropy_weight)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
@@ -206,6 +193,6 @@ if __name__=='__main__':
                             args.batch_size,
                             max_duration=args.max_duration,
                             device=DEVICE,
-                            mix_channels=args.mix_channels)
+                            mix_channels=args.mix_channels, entropy_weight=args.entropy_weight)
             
         else : raise ValueError("Either specify 'data' or give a source and memory path")
