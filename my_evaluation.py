@@ -154,7 +154,7 @@ def generate_eval_examples(tracks_list : List[List],
                 memory, src,
                 track_duration, chunk_duration, segmentation, pre_segmentation,
                 with_coupling, remove, k, decoding_type, temperature, force_coupling,
-                crossfade_time, save_dir, smaller, batch_size,
+                crossfade_time, save_dir, smaller, batch_size, True,
                 max_duration, device=device, tgt_sampling_rates={'solo':48000,'mix':48000}, mix_channels=1
             )
         

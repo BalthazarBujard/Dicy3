@@ -13,10 +13,14 @@ import glob
 
 def generate_example(model,memory,src, track_duration, chunk_duration, segmentation, pre_segmentation,
                      with_coupling,remove,k, decoding_type, temperature, force_coupling,
-                     fade_time,save_dir,smaller, batch_size,max_duration=None, device=None,
+                     fade_time,save_dir,smaller, batch_size,
+                     compute_accuracy : bool,
+                     max_duration=None, 
+                     device=None,
                      tgt_sampling_rates : dict = {'solo':None,'mix':None},
                      mix_channels : int = 2,
-                     entropy_weight : float = 0):
+                     entropy_weight : float = 0
+                     ):
     
     if device == None : device = lock_gpu[0][0]
     
@@ -29,6 +33,7 @@ def generate_example(model,memory,src, track_duration, chunk_duration, segmentat
     output = generate(
                     memory,src,model,k,with_coupling,decoding_type, temperature, force_coupling,
                     track_duration,chunk_duration,
+                    compute_accuracy=compute_accuracy,
                     entropy_weight=entropy_weight,
                     track_segmentation=pre_segmentation,
                     chunk_segmentation=segmentation,
@@ -40,12 +45,13 @@ def generate_example(model,memory,src, track_duration, chunk_duration, segmentat
                     device=device
                     )
 
+#Compute accuracy here is true because we use original memory and guide 
 def generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
                       with_coupling, remove, k, decoding_type, temperature, force_coupling, 
                       fade_time, 
                       num_examples, data, save_dir, batch_size, 
                       from_subset=False, smaller=False, max_duration=None, device=None, mix_channels=2, entropy_weight : float = 0.):
-    
+
     if device == None : device = lock_gpu[0][0]
     
     val_folder = "val_subset" if from_subset else "val"
@@ -92,7 +98,7 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
             generate_example(model, memory, src, 
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
-                             fade_time,save_dir,smaller,batch_size,max_duration,device=device,
+                             fade_time,save_dir,smaller,batch_size,max_duration=max_duration,compute_accuracy=True,device=device,
                              mix_channels=mix_channels,entropy_weight=entropy_weight)
         
 
@@ -114,7 +120,8 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
             generate_example(model, memory, src, 
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
-                             fade_time,save_dir,smaller,batch_size,max_duration,device=device)
+                             fade_time,save_dir,smaller,batch_size,max_duration=max_duration,
+                             compute_accuracy=True,device=device,entropy_weight=entropy_weight)
 
 
 if __name__=='__main__':
@@ -141,6 +148,7 @@ if __name__=='__main__':
     parser.add_argument('--source',nargs='*')
     parser.add_argument("--save_dir")
     parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
+    parser.add_argument("-accuracy","--compute_accuracy",action = "store_true")
     args = parser.parse_args()
     
     # If a file with checkpoint paths is provided, read it and add to model_ckp
@@ -191,6 +199,7 @@ if __name__=='__main__':
                             save_dir,
                             args.smaller,
                             args.batch_size,
+                            compute_accuracy=args.compute_accuracy,
                             max_duration=args.max_duration,
                             device=DEVICE,
                             mix_channels=args.mix_channels, entropy_weight=args.entropy_weight)

@@ -121,6 +121,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                       temperature : float,
                       entropy_weight : float,
                       batch_size : int,
+                      force_coupling : bool,
                       tgt_gts : list[list] = None):
 
     label_type = ListLabel
@@ -173,7 +174,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                                        max_len=len(encoded_src[0]),
                                        decoding_type=decoding_type,
                                        temperature=temperature,
-                                       tgt_gt=tgt_gt,
+                                       tgt_gt=tgt_gt if force_coupling else None, #here we do a distinction for compute accuracy and force coupling
                                        entropy_weight=entropy_weight)[1] #(B,T)
             
             #print("pred :",tgt_idx)
@@ -325,6 +326,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                       k:int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool,
                       max_track_duration:float,max_chunk_duration:float,
                       track_segmentation:str, chunk_segmentation:str,
+                      compute_accuracy : bool,
                       entropy_weight : float = 0,
                       batch_size : int = 8,
                       concat_fade_time=0.04, remove=False, max_backtrack = None,
@@ -366,10 +368,10 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     
     
     prYellow("Generating reponse...")
-    tgt_gts = labels if force_coupling else None
+    tgt_gts = labels if (force_coupling or compute_accuracy) else None
     queries, searches_for, accuracy = generate_response(src_ds, model, chunk_segmentation, 
                                                         with_coupling, k, decoding_type, generator, temperature, entropy_weight,
-                                                        batch_size, tgt_gts)
+                                                        batch_size, force_coupling, tgt_gts)
     source = src_ds.native_track
 
     prYellow("Concatenate response...")
