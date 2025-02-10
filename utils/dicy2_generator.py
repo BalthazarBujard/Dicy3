@@ -444,6 +444,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         original=original[t0:t1,:] if original.ndim==2 else original[t0:t1]
         mix = mix[t0:t1,:] if mix.ndim ==2 else mix[t0:t1]
     
+    #TODO : FIND GOOD WAY TO IMPLEMENT NAMING STRUCTURE OUTSIDE MOISES AND CANONNE
     if save_files:
         prYellow("Saving files...")
         
@@ -463,8 +464,14 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
             track_name = os.path.basename(os.path.dirname((os.path.dirname(src_path[0])))) #track folder
             #instrument_name = os.path.basename(os.path.dirname(src_path[0]))
             source_name = f"{track_name}"
+            if len(src_path)==1:
+                instrument_name = os.path.basename(os.path.dirname(memory_path))
+                source_name = f"{track_name}_{instrument_name}"
+                
         else :
-            source_name = f"{os.path.basename(src_path[0]).split('.')[0]}"  
+            A_name = os.path.basename(os.path.dirname(memory_path))
+            source_name = f"{A_name}_{os.path.basename(memory_path).split('.')[0]}"
+            #source_name = f"{os.path.basename(src_path[0]).split('.')[0]}"  
               
         save_file(save_dir,"source",source_name,source,"wav",orig_rate=src_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'])
         
