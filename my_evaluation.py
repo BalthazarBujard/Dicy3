@@ -122,7 +122,7 @@ def generate_eval_examples(tracks_list : List[List],
     
     #tracks list is like [[t11,t12,...],...,[tm1,tm2,..,tmn]]
     bar = tqdm(range(len(tracks_list)))
-    
+    #print("tracks list:",tracks_list)
     for tracks in tracks_list: 
         
         #TODO : FOR BETTER EVALUATION PICK EVERY DUO OF MEMORY/GUIDE IN TRACK LIST
@@ -138,9 +138,13 @@ def generate_eval_examples(tracks_list : List[List],
         # else : src = srcs
         # print(src)
         
+        #print("tracks:",tracks)
         duos = list(permutations(tracks,2))
+        #print("duos:",duos)
         
         for memory, src in duos:
+            print("Memory :",memory)
+            print("Guide :", src)
         
             if smaller: #find small chunk in track
                 y,sr = load(src[np.random.randint(0,len(src))],sr=None)
@@ -151,7 +155,7 @@ def generate_eval_examples(tracks_list : List[List],
             #generate
             generate_example(
                 model,
-                memory, src,
+                memory, [src],
                 track_duration, chunk_duration, segmentation, pre_segmentation,
                 with_coupling, remove, k, decoding_type, temperature, force_coupling,
                 crossfade_time, save_dir, smaller, batch_size, True,
@@ -333,13 +337,13 @@ def main():
             elif args.data == 'moises':
                 eval_roots = moises_tracks
             
-            eval_fetcher = build_coupling_ds(eval_roots,4,
+            eval_fetcher = build_coupling_ds(eval_roots,24,
                                             track_duration,chunk_duration,
                                             segmentation_strategy=segmentation_strategy,
                                             pre_segmentation='uniform',
                                             SAMPLING_RATE=16000,
-                                            direction="stem",distributed=False)
-            eval_fetcher.device = device
+                                            direction="stem",distributed=False,device=device)
+            #eval_fetcher.device = device
 
             #compute metrics
             output = evaluate_model(model,eval_fetcher,k)
@@ -457,7 +461,7 @@ def main():
             print(mean_sim,std_sim,median_sim)#,percentile90)
             print(sims)
             #save to file
-            save_to_file({"music_similarity (mean, std, median, 90th percentile)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
+            save_to_file({"music_similarity (mean, std, median)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
             
             
     
