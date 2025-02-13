@@ -10,8 +10,10 @@ import numpy as np
 import argparse
 from librosa import load
 import glob
+from pathlib import Path
+from typing import List
 
-def generate_example(model,memory,src, track_duration, chunk_duration, segmentation, pre_segmentation,
+def generate_example(model,memory : Path, src : List[Path], track_duration : float, chunk_duration : float, segmentation, pre_segmentation,
                      with_coupling,remove,k, decoding_type, temperature, force_coupling,
                      fade_time,save_dir,smaller, batch_size,
                      compute_accuracy : bool,
