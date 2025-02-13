@@ -282,8 +282,6 @@ def indexes_to_timestamps(indexes,chunks):
     
     return markers
 
-
-
 def concatenate_response(memory:np.ndarray, memory_chunks:List, queries:np.ndarray,
                          max_chunk_duration:float, sampling_rate:int, concat_fade_time:float, 
                          remove:bool, max_backtrack:float):
