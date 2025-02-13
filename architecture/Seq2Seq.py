@@ -249,7 +249,7 @@ class Seq2SeqBase(nn.Module):
         return embeddings
     
     def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:Union[int,float], max_len : int,
-                         tgt_gt : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:    
+                         tgt_gt : torch.Tensor = None, temperature : float = 1.) -> Tuple[torch.Tensor, torch.Tensor]:    
             
         B = memory.size(0)
         
@@ -286,8 +286,11 @@ class Seq2SeqBase(nn.Module):
                                           tgt_pad_mask=tgt_pad_mask,
                                           memory_pad_mask=memory_pad_mask)[:,-1:,:] #(B,1,vocab_size) only take last step
                         
-            #top-K prediction
+            #apply temperature
+            logits = logits/temperature
+            
             tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None #(B,1)
+            #top-K prediction
             next_token_idx = predict_topK_P(k,logits,tgt_token).reshape(logits.shape[:-1])[:,-1]  #(B,)
 
             #next_token : (B,D)
@@ -407,9 +410,9 @@ class Seq2SeqBase(nn.Module):
                tgt_gt : torch.Tensor = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor]:
         
         if decoding_type == "greedy":
-            tgt_out, tgt_idx = self._greedy_decoding(memory, memory_pad_mask, k, max_len, tgt_gt)
+            tgt_out, tgt_idx = self._greedy_decoding(memory, memory_pad_mask, k, max_len, tgt_gt, temperature)
             
-        elif decoding_type=="beam":
+        elif decoding_type == "beam":
             tgt_out, tgt_idx = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, temperature, entropy_weight)
         
         else : raise ValueError(f"Wrong 'decoding_type' argument {decoding_type}. Should be 'greedy' or 'beam'")
