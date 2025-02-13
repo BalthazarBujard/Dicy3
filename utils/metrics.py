@@ -4,7 +4,7 @@ from pathlib import Path
 from fadtk import FrechetAudioDistance
 from fadtk.model_loader import CLAPLaionModel,EncodecEmbModel,CLAPModel
 from fadtk.fad_batch import cache_embedding_files
-from utils.utils import lock_gpu
+from utils.utils import lock_gpu, compute_consecutive_lengths
 from librosa.feature import mfcc
 from sklearn.mixture import GaussianMixture
 from librosa import load
@@ -118,3 +118,15 @@ def evaluate_similarity(target : np.ndarray, tgt_sr : int, gt : np.ndarray, gt_s
     score = gt_GMM.score(tgt_samples)
         
     return score
+
+def compute_lengths_histogram(arr : np.ndarray, normalized : bool = False) -> np.ndarray :
+    #compute consecutive lengths of the array
+    lengths = compute_consecutive_lengths(arr)
+    
+    #compute histogram (=bincount)
+    histogram = np.bincount(lengths)
+    
+    #probabilities rather than count
+    if normalized : histogram/=sum(histogram)
+    
+    return histogram

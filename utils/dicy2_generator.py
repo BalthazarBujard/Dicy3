@@ -2,7 +2,7 @@
 #%%
 from architecture.Model import load_model_checkpoint
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
-from utils.utils import lock_gpu, prGreen, prRed, prYellow, detect_onsets, find_non_empty
+from utils.utils import lock_gpu, prGreen, prRed, prYellow, detect_onsets, find_non_empty, compute_consecutive_lengths
 from .metrics import compute_accuracy
 import torch
 import numpy as np
@@ -38,7 +38,7 @@ from gig.main.query import InfluenceQuery # type: ignore
 def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoupling, chunk_segmentation : str, batch_size : int):
     
     #dicy2 args
-    max_continuity: int = 10000  # longest continuous sequence of the original text that is allowed before a jump is forced
+    max_continuity: int = 100000  # longest continuous sequence of the original text that is allowed before a jump is forced
     force_output: bool = False #True  # if no matches are found: output the next event (if True) or output None (if False)
     label_type = ListLabel
     
@@ -68,7 +68,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     for i in range(len(memory_fetcher)):
         memory_data = next(memory_fetcher) #contains chunks and other data for model
         #encode memory -> extract labels for each slice/chunk
-        memory_idx = model.encoder(memory_data.src, padding_mask = memory_data.src_padding_masks[0])[1] #(B,S)
+        memory_idx = model.encoder.forward(memory_data.src, padding_mask = memory_data.src_padding_masks[0])[1] #(B,S)
         
         #corpus = memory as [(label, content)] where label is codebook index from encoding and content is the slice index
         
@@ -282,26 +282,9 @@ def indexes_to_timestamps(indexes,chunks):
     
     return markers
 
-def compute_consecutive_lengths(idxs : np.ndarray):
-    # if not idxs:
-    #     return []
-    
-    lengths = []
-    current_length = 1
-    
-    for i in range(1, len(idxs)):
-        if idxs[i] == idxs[i - 1]+1 and idxs[i-1]!=-1:  # Same segment, increase length
-            current_length += 1
-        else:  # New segment, save current length and reset
-            lengths.append(current_length)
-            current_length = 1
-    
-    # Append the last segment length
-    lengths.append(current_length)
-    
-    return lengths
 
-def concatenate_response(memory:np.ndarray, memory_chunks:np.ndarray, queries:np.ndarray,
+
+def concatenate_response(memory:np.ndarray, memory_chunks:List, queries:np.ndarray,
                          max_chunk_duration:float, sampling_rate:int, concat_fade_time:float, 
                          remove:bool, max_backtrack:float):
     #create concatenate object
@@ -465,13 +448,14 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
             #instrument_name = os.path.basename(os.path.dirname(src_path[0]))
             source_name = f"{track_name}"
             if len(src_path)==1:
-                instrument_name = os.path.basename(os.path.dirname(memory_path))
+                instrument_name = os.path.basename(os.path.dirname(src_path[0]))
                 source_name = f"{track_name}_{instrument_name}"
                 
         else :
-            A_name = os.path.basename(os.path.dirname(memory_path))
-            source_name = f"{A_name}_{os.path.basename(memory_path).split('.')[0]}"
-            #source_name = f"{os.path.basename(src_path[0]).split('.')[0]}"  
+            if len(src_path)==1:
+                A_name = os.path.basename(os.path.dirname(src_path[0]))
+                source_name = f"{A_name}_{os.path.basename(src_path[0]).split('.')[0]}" #A{i}_{fodler/track_name}
+            else : source_name = f"{os.path.basename(src_path[0]).split('.')[0]}"  #folder name
               
         save_file(save_dir,"source",source_name,source,"wav",orig_rate=src_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'])
         

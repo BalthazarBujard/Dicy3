@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from librosa import time_to_frames,frames_to_time
 from librosa.onset import onset_backtrack, onset_detect
-from typing import Optional
+from typing import Optional, List
 #from essentia.standard import Windowing,FFT,CartesianToPolar,FrameGenerator,Onsets,OnsetDetection
 #import essentia 
 
@@ -110,7 +110,7 @@ def lock_gpu(num_devices=1):
             devices.append(device)
             ids.append(gpu_id_locked)
     else :
-        device = torch.device("gpu" if torch.conda.is_available() else "cpu")
+        device = torch.device("gpu" if torch.cuda.is_available() else "cpu")
         devices = [device]
         ids=[-1]
     
@@ -164,7 +164,7 @@ def random_sample(topK_idx : torch.Tensor):
     sampled_idx = torch.gather(topK_idx, 1, random_idx).squeeze(1)
     
     return sampled_idx
-#%%
+
 def topK_search(k, logits : torch.Tensor, targets : Optional[torch.Tensor]=None):
     B,C = logits.size()
     topK_idx = torch.topk(logits,k,dim=-1)[1] #(B,k)
@@ -235,7 +235,7 @@ def topP_search(p: float, logits : torch.Tensor, targets : Optional[torch.Tensor
         sampled_idx = torch.tensor([random_sample(topP_sample.unsqueeze(0)) for topP_sample in topP_idx], device=logits.device)
     
     return sampled_idx
-#%%
+
 
 def predict_topK_P(k,logits : torch.Tensor, tgt : Optional[torch.Tensor]=None):
     logits_rs = logits.reshape(-1,logits.size(-1)) #(B*T,vocab)
@@ -255,7 +255,8 @@ def build_coupling_ds(roots, BATCH_SIZE, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
                     mask_prob=0.0,
                     mask_len=0,
                     SAMPLING_RATE=16000,
-                    distributed=True):
+                    distributed=True,
+                    device=None):
     
     from MusicDataset.MusicDataset_v2 import MusicCouplingContainer, DataCollatorForCoupling, Fetcher
     from torch.utils.data import DataLoader,DistributedSampler
@@ -281,7 +282,7 @@ def build_coupling_ds(roots, BATCH_SIZE, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
     loader = DataLoader(ds, BATCH_SIZE, shuffle=shuffle,sampler=sampler, #with distributed shuffle = false
                         collate_fn=collate_fn,num_workers=2,pin_memory=True)
 
-    fetcher = Fetcher(loader)
+    fetcher = Fetcher(loader,device)
     
     return fetcher
 
@@ -334,59 +335,24 @@ def find_non_empty(track,max_duration,sampling_rate,return_time=False,find_max=F
 def normalize(arr):
     return np.interp(arr,(arr.min(),arr.max()),(-1,1))
     
-""" 
-def evaluate(model : torch.nn.Module, eval_fetcher, k: int, codebook_sample_temperature : float = 0):
-    from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
-    from utils.metrics import compute_accuracy,compute_entropy
-    from tqdm import tqdm
+def compute_consecutive_lengths(idxs : np.ndarray) -> List:
+    # if not idxs:
+    #     return []
     
-    model.eval()
-    acc=0
-    diversity = 0 #predicted tokens entropy
-    codebook_perplexity = 0 #entropy of encoded inputs
-    with torch.no_grad():
-        for _ in tqdm(range(len(eval_fetcher))):
-            inputs = next(eval_fetcher)
-            
-            if type(model)==Seq2SeqCoupling:
-                src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices = inputs.values()
-                #compute output
-                logits, tgt, tgt_idx, _ = model(src, tgt, src_pad_mask, tgt_pad_mask,
-                                                            sample_codebook_temp=codebook_sample_temperature)
-                
-            elif type(model)==Seq2SeqBase: #for autocompletion
-                src, src_pad_mask, src_mask_indices, label = inputs.values() 
-                #compute output
-                logits, tgt, tgt_idx, _ = model(src, src_pad_mask, sample_codebook_temp=codebook_sample_temperature)
-            
-            #encoded inputs
-            encoded_src = model.encoder(src, padding_mask = src_pad_mask[0])[1] #only take cb indexes to compute entropy
-                    
-            tgt_out = tgt_idx[:,1:] #ground truth
-            
-            #topK search
-            preds = predict_topK(k,logits,tgt_out)
-            
-            #accuracy
-            acc += compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=model.special_tokens_idx["pad"])
-            
-            #diversity
-            diversity += compute_entropy(preds,min_length=model.vocab_size).item()
-            
-            
-            codebook_perplexity += 2**compute_entropy(encoded_src.reshape(-1),min_length=model.codebook_size).item()
-            
-            #del src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices, logits, tgt_idx, tgt_out, preds
+    lengths = []
+    current_length = 1
     
-    acc /= len(eval_fetcher)
-    diversity/=len(eval_fetcher)
-    codebook_perplexity/=len(eval_fetcher)
+    for i in range(1, len(idxs)):
+        if idxs[i] == idxs[i - 1]+1 and idxs[i-1]!=-1:  # Same segment, increase length
+            current_length += 1
+        else:  # New segment, save current length and reset
+            lengths.append(current_length)
+            current_length = 1
     
-    #torch.cuda.empty_cache()
-    #del src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices, logits, tgt_idx, tgt_out, preds
+    # Append the last segment length
+    lengths.append(current_length)
     
-    return acc, diversity, codebook_perplexity """
-
+    return lengths
 
 # def detect_onsets(track, sampling_rate, with_backtrack):
 #     if sampling_rate<44100 : raise ValueError("The sampling rate for essentia onset detect is otpimized for 44.1kHz. For lower rates use librosa.")
