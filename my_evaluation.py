@@ -1,4 +1,3 @@
-#%%
 from utils.utils import lock_gpu
 device = lock_gpu()[0][0]
 import os

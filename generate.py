@@ -1,6 +1,4 @@
-from utils.utils import lock_gpu, find_non_empty
-DEVICES,_=lock_gpu()
-DEVICE = DEVICES[0]
+from utils.utils import find_non_empty
 from utils.dicy2_generator import generate
 from utils.coupling_ds_generator import extract_group
 from architecture.Model import load_model_checkpoint
@@ -24,7 +22,7 @@ def generate_example(model,memory : Path, src : List[Path], track_duration : flo
                      entropy_weight : float = 0
                      ):
     
-    if device == None : device = lock_gpu[0][0]
+    #if device == None : device = lock_gpu[0][0]
     
     if smaller: #find small chunk in track
         y,sr = load(src[np.random.randint(0,len(src))],sr=None)
@@ -54,7 +52,7 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                       num_examples, data, save_dir, batch_size, 
                       from_subset=False, smaller=False, max_duration=None, device=None, mix_channels=2, entropy_weight : float = 0.):
 
-    if device == None : device = lock_gpu[0][0]
+    #if device == None : device = lock_gpu[0][0]
     
     val_folder = "val_subset" if from_subset else "val"
     
@@ -128,6 +126,10 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
 
 if __name__=='__main__':
     
+    from utils.utils import lock_gpu
+    DEVICES,_=lock_gpu()
+    DEVICE = DEVICES[0]
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_ckp",type=str,nargs="*")
     parser.add_argument("--model_ckps_folder",type=str)
@@ -152,6 +154,8 @@ if __name__=='__main__':
     parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
     parser.add_argument("-accuracy","--compute_accuracy",action = "store_true")
     args = parser.parse_args()
+    
+    
     
     # If a file with checkpoint paths is provided, read it and add to model_ckp
     if args.model_ckps_folder:
