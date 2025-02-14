@@ -5,6 +5,7 @@ import numpy as np
 from librosa import time_to_frames,frames_to_time
 from librosa.onset import onset_backtrack, onset_detect
 from typing import Optional, List
+from pathlib import Path
 #from essentia.standard import Windowing,FFT,CartesianToPolar,FrameGenerator,Onsets,OnsetDetection
 #import essentia 
 
@@ -247,7 +248,8 @@ def predict_topK_P(k,logits : torch.Tensor, tgt : Optional[torch.Tensor]=None):
         
     return preds
 
-def build_coupling_ds(roots, BATCH_SIZE, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
+def build_coupling_ds(roots : List[List[Path]], 
+                      batch_size : int, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
                     segmentation_strategy="uniform",
                     pre_segmentation='sliding',
                     ignore=[],
@@ -279,7 +281,7 @@ def build_coupling_ds(roots, BATCH_SIZE, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
         sampler=DistributedSampler(ds)
         shuffle=False
     
-    loader = DataLoader(ds, BATCH_SIZE, shuffle=shuffle,sampler=sampler, #with distributed shuffle = false
+    loader = DataLoader(ds, batch_size, shuffle=shuffle,sampler=sampler, #with distributed shuffle = false
                         collate_fn=collate_fn,num_workers=2,pin_memory=True)
 
     fetcher = Fetcher(loader,device)

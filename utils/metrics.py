@@ -4,7 +4,7 @@ from pathlib import Path
 from fadtk import FrechetAudioDistance
 from fadtk.model_loader import CLAPLaionModel,EncodecEmbModel,CLAPModel
 from fadtk.fad_batch import cache_embedding_files
-from utils.utils import lock_gpu, compute_consecutive_lengths
+from utils.utils import compute_consecutive_lengths
 from librosa.feature import mfcc
 from sklearn.mixture import GaussianMixture
 from librosa import load
@@ -27,9 +27,9 @@ def compute_entropy(input,min_length):
 
 #function to evaluate audio quality of predictions
 #ref and tgt are paths to folders containing audio files
-def evaluate_audio_quality(reference_dir : Path, target_dir : Path, fad_inf : bool, device=None):
+def evaluate_audio_quality(reference_dir : Path, target_dir : Path, fad_inf : bool, device : torch.device):
     
-    if device==None : device = lock_gpu()[0][0]
+    # if device==None : device = lock_gpu()[0][0]
     
     model = EncodecEmbModel('48k')
     model.device=device
@@ -50,13 +50,13 @@ def evaluate_audio_quality(reference_dir : Path, target_dir : Path, fad_inf : bo
     return score
 
 #PROBLEM WITH CLAP EMBEDDING
-def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir : Path, embedding : str, fad_inf : bool, device = None):
+def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir : Path, embedding : str, fad_inf : bool, device :torch.device):
 
     #background is the folder containing true pairs
     #fake_background is the folder containing misaligned pairs = mix with a random accompaniement from random track
     #target is the folder containing the mix
     
-    if device==None : device = lock_gpu()[0][0]
+    # if device==None : device = lock_gpu()[0][0]
     
     if embedding=="L-CLAP":
         model = CLAPLaionModel('music') 
