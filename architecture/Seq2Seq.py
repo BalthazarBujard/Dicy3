@@ -243,7 +243,7 @@ class Seq2SeqBase(nn.Module):
         return embeddings
     
     def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:Union[int,float], max_len : int,
-                         tgt_gt : torch.Tensor = None, temperature : float = 1.) -> Tuple[torch.Tensor, torch.Tensor]:    
+                         tgt_gt : torch.Tensor = None, temperature : float = 1.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:    
             
         B = memory.size(0)
         
@@ -382,7 +382,7 @@ class Seq2SeqBase(nn.Module):
 
     
     def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, 
-                              k : int, max_len : int, temperature : float, entropy_weight : Optional[float] = 0) -> Tuple[torch.Tensor, torch.Tensor]:
+                              k : int, max_len : int, temperature : float, entropy_weight : Optional[float] = 0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         B = memory.size(0)
         
@@ -395,22 +395,24 @@ class Seq2SeqBase(nn.Module):
         beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn,score_fn_args=score_fn_args)
 
         best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
+        
         # for batch_candidates in best_candidates:
         #     for nbest_candidate in batch_candidates:
         #         print(nbest_candidate)
         # best_candidates = [[best_candidate for best_candidate in nbest_candidates[0:1]] for nbest_candidates in best_candidates]
         #convert candidates to states and embeddings
+        
         tgt_idx = torch.tensor([[c.states for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1) #remove extra dimension
         tgt = self.from_indexes_to_embeddings(tgt_idx)
         
-        probs = torch.tensor([[c.probs for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1)
+        probs = torch.tensor([[c.beam_probs for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1)
         
         return tgt, tgt_idx, probs
 
     
     def decode(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor,
                k:int, max_len : int, decoding_type : str, temperature : float = 1,
-               tgt_gt : torch.Tensor = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor]:
+               tgt_gt : torch.Tensor = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         if decoding_type == "greedy":
             tgt_out, tgt_idx, probs = self._greedy_decoding(memory, memory_pad_mask, k, max_len, tgt_gt, temperature)
@@ -512,7 +514,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
     @torch.no_grad
     def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
                  k:int, max_len : int, decoding_type : str, temperature : float, 
-                 tgt_gt : Optional[torch.Tensor] = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor]: 
+                 tgt_gt : Optional[torch.Tensor] = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: 
         
         src = encoded_src
         
@@ -525,16 +527,17 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         return tgt, tgt_idx, probs
     
-    #NOT USED AT THE MOMENT AND OUTDATED --> COUPLING IS USED
-    # @torch.no_grad 
-    # def generate(self,src : torch.Tensor ,src_pad_masks : torch.Tensor, 
-    #              k : int = 1, max_len : Optional[int] = None, temperature : float = 1) -> Tuple[torch.Tensor,torch.Tensor]:
+    #NOT USED AT THE MOMENT 
+    @torch.no_grad 
+    def generate(self,src : torch.Tensor ,src_pad_masks : List[torch.Tensor], 
+                 k : int, decoding_type : str, max_len : Optional[int] = None, 
+                 temperature : float = 1, entropy_weight : float = 0) -> Tuple[torch.Tensor,torch.Tensor]:
         
-    #     encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
+        encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
         
-    #     tgt, tgt_idx, probs = self.coupling(encoded_src, src_pad_mask, k, max_len, temperature) #generate sequence of expected labels for coupling
+        tgt, tgt_idx, probs = self.coupling(encoded_src, src_pad_mask, k, max_len, decoding_type, temperature, None, entropy_weight) #generate sequence of expected labels for coupling
         
-    #     return tgt, tgt_idx, probs #tgt probably not used but not bad idea    
+        return tgt, tgt_idx, probs #tgt probably not used but not bad idea    
         
         
         
