@@ -468,7 +468,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         save_file(save_dir,"query",f"{mix_name}",query,"txt",orig_rate=None,tgt_rate=None)
         idx = save_file(save_dir,"search_for",f"{mix_name}",search_for,"txt",orig_rate=None,tgt_rate=None)
         
-        write_info(model,memory_path, src_path, mix_name, idx, k, with_coupling, 
+        write_info(model,memory_path, src_path, mix_name, idx, model.name, k, with_coupling, 
                    remove, accuracy, mean_len, median_len, max_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
                    decoding_type=decoding_type, force_coupling=force_coupling, temperature=temperature,entropy_weight=entropy_weight)
     
@@ -515,7 +515,7 @@ def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate):
     
     return idx
 
-def write_info(model: Seq2SeqBase, memory_path, source_paths, mix_name, idx, top_k, with_coupling, remove,
+def write_info(model: Seq2SeqBase, memory_path, source_paths, mix_name, idx, model_name, top_k, with_coupling, remove,
                accuracy, mean_len, median_len, max_len, entropy, 
                w_size, save_dir, decoding_type, force_coupling, temperature, entropy_weight):
     # Ensure the info directory exists
@@ -531,11 +531,13 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, mix_name, idx, top
     f"\tMemory: {memory_path}\n"
     f"\tSources:\n"
     + "\n".join(f"\t - {path}" for path in source_paths) + "\n"
+    f"\t Model : {model_name}\n"
     f"\tParams :\n"
     f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, force_coupling = {force_coupling}, temperature = {temperature}, entropy_weight = {entropy_weight}\n"
 
     f"\tAnalysis :\n"
-    f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, max_len = {max_len}, entropy = {entropy:.2f} [Bits]\n\n")
+    f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, max_len = {max_len}, entropy = {entropy:.2f} [Bits]\n\n"
+    )
     
     # Open the file in append mode and write the content
     with open(info_path, 'a') as file:

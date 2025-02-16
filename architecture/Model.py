@@ -66,7 +66,10 @@ def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_non
     model.load_state_dict(state_dict)
     
     segmentation_startegy = model_params["segmentation"]
+    
+    #information attributes
     model.segmentation = segmentation_startegy
+    model.name = model_params["run_id"]
     
     return model, model_params, optimizer_state_dict
 

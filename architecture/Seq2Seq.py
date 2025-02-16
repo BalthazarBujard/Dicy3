@@ -58,6 +58,11 @@ class Seq2SeqBase(nn.Module):
                  max_len : int, use_special_tokens : bool = True, has_masking : bool = False): 
         super().__init__()
         
+        #TODO : CLEAN THIS. ITS NOT PROPER PYTHON TO DO SUCH
+        #information attributes intialized after loading
+        self.name = None
+        self.segmentation = None
+        
         self.encoder = localEncoder#LocalEncoder(pretrained_backbone,quantizer,head_module=encoder_head)
     
         self.dim = self.encoder.dim #keep same dimension as output of encoder

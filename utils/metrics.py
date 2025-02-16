@@ -49,7 +49,6 @@ def evaluate_audio_quality(reference_dir : Path, target_dir : Path, fad_inf : bo
     
     return score
 
-#PROBLEM WITH CLAP EMBEDDING
 def evaluate_APA(background_dir : Path, fake_background_dir : Path, target_dir : Path, embedding : str, fad_inf : bool, device :torch.device):
 
     #background is the folder containing true pairs
