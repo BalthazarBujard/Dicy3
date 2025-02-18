@@ -24,10 +24,11 @@ def generate_example(model,memory : Path, src : List[Path], track_duration : flo
     
     #if device == None : device = lock_gpu[0][0]
     
-    if smaller: #find small chunk in track
-        y,sr = load(src[np.random.randint(0,len(src))],sr=None)
+    if smaller: #find small chunk in memory track
+        y,sr = load(memory,sr=None)
         t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
         timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
+        print(timestamps)
     else : timestamps=[None,None]
     
     output = generate(

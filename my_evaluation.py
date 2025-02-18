@@ -124,10 +124,6 @@ def generate_eval_examples(tracks_list : List[List],
     #print("tracks list:",tracks_list)
     for tracks in tracks_list: 
         
-        #TODO : FOR BETTER EVALUATION PICK EVERY DUO OF MEMORY/GUIDE IN TRACK LIST
-        
-        
-        
         #pick a source and memory
         # memory = np.random.choice(tracks)
         # srcs = [t for t in tracks if t!=memory]
@@ -145,11 +141,11 @@ def generate_eval_examples(tracks_list : List[List],
             print("Memory :",memory)
             print("Guide :", src)
         
-            if smaller: #find small chunk in track
-                y,sr = load(src[np.random.randint(0,len(src))],sr=None)
-                t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
-                timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
-            else : timestamps=[None,None]
+            # if smaller: #find small chunk in track
+            #     y,sr = load(src[np.random.randint(0,len(src))],sr=None)
+            #     t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
+            #     timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
+            # else : timestamps=[None,None]
             
             #generate
             generate_example(
