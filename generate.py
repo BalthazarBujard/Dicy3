@@ -19,7 +19,8 @@ def generate_example(model,memory : Path, src : List[Path], track_duration : flo
                      device=None,
                      tgt_sampling_rates : dict = {'solo':None,'mix':None},
                      mix_channels : int = 2,
-                     entropy_weight : float = 0
+                     entropy_weight : float = 0,
+                     save_concat_args : bool = False
                      ):
     
     #if device == None : device = lock_gpu[0][0]
@@ -28,7 +29,6 @@ def generate_example(model,memory : Path, src : List[Path], track_duration : flo
         y,sr = load(memory,sr=None)
         t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
         timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
-        print(timestamps)
     else : timestamps=[None,None]
     
     output = generate(
@@ -43,7 +43,8 @@ def generate_example(model,memory : Path, src : List[Path], track_duration : flo
                     remove=remove, timestamps=timestamps,
                     save_dir=save_dir, max_output_duration = max_duration,
                     tgt_sampling_rates=tgt_sampling_rates, mix_channels=mix_channels,
-                    device=device
+                    device=device,
+                    save_concat_args=save_concat_args
                     )
 
 #Compute accuracy here is true because we use original memory and guide 
@@ -51,7 +52,13 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                       with_coupling, remove, k, decoding_type, temperature, force_coupling, 
                       fade_time, 
                       num_examples, data, save_dir, batch_size, 
-                      from_subset=False, smaller=False, max_duration=None, device=None, mix_channels=2, entropy_weight : float = 0.):
+                      from_subset=False, 
+                      smaller=False, 
+                      max_duration=None, 
+                      device=None, 
+                      mix_channels=2, 
+                      entropy_weight : float = 0.,
+                      save_concat_args : bool = False):
 
     #if device == None : device = lock_gpu[0][0]
     
@@ -100,7 +107,7 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
                              fade_time,save_dir,smaller,batch_size,max_duration=max_duration,compute_accuracy=True,device=device,
-                             mix_channels=mix_channels,entropy_weight=entropy_weight)
+                             mix_channels=mix_channels,entropy_weight=entropy_weight,save_concat_args=save_concat_args)
         
 
     elif data == 'moises':
@@ -122,7 +129,7 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
                              fade_time,save_dir,smaller,batch_size,max_duration=max_duration,
-                             compute_accuracy=True,device=device,entropy_weight=entropy_weight)
+                             compute_accuracy=True,device=device,entropy_weight=entropy_weight,save_concat_args=save_concat_args)
 
 
 if __name__=='__main__':
@@ -146,14 +153,15 @@ if __name__=='__main__':
     parser.add_argument("--sliding", action = "store_true")
     parser.add_argument("--num_examples",type=int, default=1)
     parser.add_argument("--smaller",action='store_true')
-    parser.add_argument("--max_duration",type=float)
-    parser.add_argument("--data")
+    parser.add_argument("--max_duration",type=float, default=60.)
+    parser.add_argument("--data", choices = ["canonne","canonne_duos","canonne_trios","moises"])
     parser.add_argument("--from_subset", action = 'store_true')
     parser.add_argument('--memory')
     parser.add_argument('--source',nargs='*')
     parser.add_argument("--save_dir")
     parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
     parser.add_argument("-accuracy","--compute_accuracy",action = "store_true")
+    parser.add_argument("--save_concat_args", action = "store_true", help = "if True : save concatenation arguments for easier modification of parameters and arguments")
     args = parser.parse_args()
     
     
@@ -197,7 +205,11 @@ if __name__=='__main__':
                             batch_size=args.batch_size,
                             smaller=args.smaller,
                             max_duration=args.max_duration,
-                            from_subset=args.from_subset, device=DEVICE, mix_channels=args.mix_channels, entropy_weight = args.entropy_weight)
+                            from_subset=args.from_subset, 
+                            device=DEVICE,
+                            mix_channels=args.mix_channels,
+                            entropy_weight = args.entropy_weight,
+                            save_concat_args=args.save_concat_args)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
@@ -209,6 +221,8 @@ if __name__=='__main__':
                             compute_accuracy=args.compute_accuracy,
                             max_duration=args.max_duration,
                             device=DEVICE,
-                            mix_channels=args.mix_channels, entropy_weight=args.entropy_weight)
+                            mix_channels=args.mix_channels, 
+                            entropy_weight=args.entropy_weight,
+                            save_concat_args=args.save_concat_args)
             
         else : raise ValueError("Either specify 'data' or give a source and memory path")

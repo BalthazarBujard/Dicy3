@@ -7,13 +7,14 @@ from .metrics import compute_accuracy
 import torch
 import numpy as np
 import sys, typing, os
-from typing import Union, List
+from typing import Union, List, Optional
 import scipy.io.wavfile as wav
 import soundfile as sf
 from librosa import resample
 from munch import Munch
 from concatenate import Concatenator, TimeStamp #custom library for concatenating audio chunks from time markers
 import time
+from pathlib import Path
 #for dicy2 library
 sys.path.insert(0,"/data3/anasynth_nonbp/bujard/Dicy2-python")
 
@@ -282,14 +283,70 @@ def indexes_to_timestamps(indexes,chunks):
     
     return markers
 
-def concatenate_response(memory:np.ndarray, memory_chunks:List, queries:np.ndarray,
-                         max_chunk_duration:float, sampling_rate:int, concat_fade_time:float, 
-                         remove:bool, max_backtrack:float):
+#function that saves concatenation arguments before concatenation. helps to only reconcatenate by changing a few arguments
+def save_and_concatenate(memory_chunks:List, 
+                         queries:np.ndarray,
+                         concat_fade_time:float,
+                         sampling_rate:int,  
+                         remove:bool, 
+                         max_backtrack:float,
+                         save_path : Path) : 
+    
+    #save params
+    np.savez(save_path, 
+             chunks = np.asarray(memory_chunks,dtype=object), 
+             queries = queries, 
+             fade_time = concat_fade_time,
+             sampling_rate = sampling_rate,
+             remove = remove,
+             max_backtrack = max_backtrack)
+    
+    #concatenate
+    response = concatenate_response(memory_chunks, queries, concat_fade_time, sampling_rate, remove, max_backtrack)
+    
+    return response
+
+def load_and_concatenate(load_path : Path,
+                         new_fade_time : Optional[float],
+                         new_remove : Optional[bool],
+                         new_max_backtrack : Optional[float]) : 
+    
+    #load data containing arguments for concatenation
+    data = np.load(load_path, allow_pickle=True)
+    
+    #permanent arguments
+    memory_chunks = data["memory_chunks"].tolist()
+    queries = data["queries"]
+    sampling_rate = data["sampling_rate"]
+    
+    #modifiable arguments
+    concat_fade_time = new_fade_time if new_fade_time else data["fade_time"]
+    remove = new_remove if new_remove else data["remove"]
+    max_backtrack = new_max_backtrack if new_max_backtrack else data["max_backtrack"]
+    
+    #concatenate
+    response = concatenate_response(memory_chunks, queries, concat_fade_time, sampling_rate, remove, max_backtrack)
+    
+    return response
+
+def concatenate_response(memory_chunks:List, 
+                         queries:np.ndarray,
+                         concat_fade_time:float,
+                         sampling_rate:int,  
+                         remove:bool, 
+                         max_backtrack:float):
     #create concatenate object
     concatenate = Concatenator() 
     
+    #construct whole memory from chunks
+    memory = np.reshape(memory_chunks,-1)
+    
+    #extract max_chunk_duration. TODO : WHEN ADDING "new_times" silence handling will be different (tbd)
+    max_chunk_duration_samples = len(max(memory_chunks,key=lambda x : len(x)))
+    
     #append 2x chunk duration with zeros for silence handling. need 2 times for crossfade purposes
-    silence = np.zeros(int(max_chunk_duration*sampling_rate))
+    #silence = np.zeros(int(max_chunk_duration*sampling_rate))
+    silence = np.zeros(max_chunk_duration_samples)
     memory_with_silence = np.concatenate([memory,silence,silence]) 
     memory_chunks.extend([silence]*2)
     
@@ -315,7 +372,8 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                       sampling_rate=16000, tgt_sampling_rates : dict = {'solo':None,'mix':None},
                       max_output_duration=None, mix_channels=2, timestamps=[None,None],
                       save_files=True,
-                      save_dir='output'):
+                      save_dir='output',
+                      save_concat_args = False):
     
     if chunk_segmentation=='onset':
         raise ValueError("Concatenation algorithm not compatible with 'onset' segmentation")
@@ -356,7 +414,24 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     source = src_ds.native_track
 
     prYellow("Concatenate response...")
-    response = concatenate_response(memory,memory_chunks,queries,max_chunk_duration,memory_ds.native_sr,concat_fade_time,remove,max_backtrack)
+    if save_concat_args : 
+        #folder_trackname --> moises : 45273_..._voix et cannone : A{i}_Duo2_1_guitare
+        #concat file name is the same as response fname
+        if "moises" in memory_path:
+            track_name = os.path.basename(os.path.dirname((os.path.dirname(memory_path)))) #track folder
+            instrument_name = os.path.basename(os.path.dirname(memory_path))
+            concat_file = f"{track_name}_{instrument_name}"
+        else :
+            A_name = os.path.basename(os.path.dirname(memory_path))
+            concat_file = f"{A_name}_{os.path.basename(memory_path).split('.')[0]}"
+        
+        concat_file += ".npz"   
+        save_concat_folder = Path(save_dir+f"/concat_args")
+        os.makedirs(save_concat_folder, exist_ok=True)
+        save_concat_path = save_concat_folder / concat_file
+        response = save_and_concatenate(memory_chunks,queries,concat_fade_time,memory_ds.native_sr,remove,max_backtrack,save_concat_path)
+    
+    else : response = concatenate_response(memory_chunks,queries,concat_fade_time,memory_ds.native_sr,remove,max_backtrack)
     
      
     memory = np.array(memory)
@@ -531,7 +606,7 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, mix_name, idx, mod
     f"\tMemory: {memory_path}\n"
     f"\tSources:\n"
     + "\n".join(f"\t - {path}" for path in source_paths) + "\n"
-    f"\t Model : {model_name}\n"
+    f"\tModel : {model_name}\n"
     f"\tParams :\n"
     f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, force_coupling = {force_coupling}, temperature = {temperature}, entropy_weight = {entropy_weight}\n"
 
