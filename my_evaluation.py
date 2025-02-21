@@ -1,5 +1,4 @@
-from utils.utils import lock_gpu
-device = lock_gpu()[0][0]
+
 import os
 import torch
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
@@ -25,7 +24,7 @@ from itertools import permutations
     
 
 #this function evaluates the Decision module and the perception's quantized encoding
-def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int):
+def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device : torch.cuda.device):
     
     model.eval()
     acc=0
@@ -117,6 +116,7 @@ def generate_eval_examples(tracks_list : List[List],
                            segmentation : str, pre_segmentation : str, 
                            crossfade_time : float, max_duration : float, 
                            save_dir : Path, 
+                           device : torch.cuda.device,
                            smaller : bool = False, random_subset : bool = True, remove : bool = False, batch_size : int = 8):
     
     #tracks list is like [[t11,t12,...],...,[tm1,tm2,..,tmn]]
@@ -202,6 +202,9 @@ def parse_args():
            
 def main():
     
+    from utils.utils import lock_gpu
+    device = lock_gpu()[0][0]
+    
     args = parse_args()
     if args.model_ckp == None:
         assert args.model_ckps_folder != None, "If no model ckp given, specify folder containing all the models to evaluate."
@@ -283,9 +286,14 @@ def main():
 
             if args.data=='moises':
                 generate_eval_examples(moises_tracks,model,k,args.with_coupling,
-                                  args.decoding_type,args.temperature,args.force_coupling,
-                                  track_duration,chunk_duration,
-                                segmentation_strategy,pre_segmentation,args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller)
+                                args.decoding_type,args.temperature,args.force_coupling,
+                                track_duration,chunk_duration,
+                                segmentation_strategy,pre_segmentation,
+                                args.crossfade_time,
+                                args.max_duration,
+                                save_dir,
+                                smaller=args.smaller,
+                                device=device)
                 
             elif args.data == 'canonne':
                 #get all tracks in each duo
@@ -299,7 +307,7 @@ def main():
                                         args.decoding_type,args.temperature,args.force_coupling,
                                         track_duration,chunk_duration,segmentation_strategy,pre_segmentation,
                                         args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller,
-                                        random_subset=False
+                                        random_subset=False, device=device
                                         )
                 
                 
@@ -315,7 +323,7 @@ def main():
                                         args.decoding_type,args.temperature,args.force_coupling,
                                         track_duration,chunk_duration,segmentation_strategy,pre_segmentation,
                                         args.crossfade_time,args.max_duration,save_dir,smaller=args.smaller,
-                                        random_subset=False
+                                        random_subset=False,device=device
                                         )
                     
         if 'model' in args.task:
@@ -341,7 +349,7 @@ def main():
             #eval_fetcher.device = device
 
             #compute metrics
-            output = evaluate_model(model,eval_fetcher,k)
+            output = evaluate_model(model,eval_fetcher,k,device)
             
             #save output to file
             #save_to_file({'k':k},eval_file)
@@ -458,13 +466,7 @@ def main():
             #save to file
             save_to_file({"music_similarity (mean, std, median)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
             
-            
-    
-            
-    
-    
-        
-    
+
 
 if __name__=='__main__':
     main()

@@ -1,9 +1,8 @@
 from utils.utils import find_non_empty
-from utils.dicy2_generator import generate
+from utils.dicy2_generator import generate, load_and_concatenate
 from utils.coupling_ds_generator import extract_group
 from architecture.Model import load_model_checkpoint
 import os
-from IPython.display import Audio
 import numpy as np
 import argparse
 from librosa import load
@@ -130,7 +129,7 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
                              fade_time,save_dir,smaller,batch_size,max_duration=max_duration,
                              compute_accuracy=True,device=device,entropy_weight=entropy_weight,save_concat_args=save_concat_args)
-
+    
 
 if __name__=='__main__':
     

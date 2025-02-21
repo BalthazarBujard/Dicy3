@@ -315,7 +315,7 @@ def load_and_concatenate(load_path : Path,
     data = np.load(load_path, allow_pickle=True)
     
     #permanent arguments
-    memory_chunks = data["memory_chunks"].tolist()
+    memory_chunks = data["chunks"].tolist()
     queries = data["queries"]
     sampling_rate = data["sampling_rate"]
     
@@ -327,7 +327,7 @@ def load_and_concatenate(load_path : Path,
     #concatenate
     response = concatenate_response(memory_chunks, queries, concat_fade_time, sampling_rate, remove, max_backtrack)
     
-    return response
+    return response, data
 
 def concatenate_response(memory_chunks:List, 
                          queries:np.ndarray,
@@ -429,6 +429,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         save_concat_folder = Path(save_dir+f"/concat_args")
         os.makedirs(save_concat_folder, exist_ok=True)
         save_concat_path = save_concat_folder / concat_file
+        
         response = save_and_concatenate(memory_chunks,queries,concat_fade_time,memory_ds.native_sr,remove,max_backtrack,save_concat_path)
     
     else : response = concatenate_response(memory_chunks,queries,concat_fade_time,memory_ds.native_sr,remove,max_backtrack)
@@ -438,9 +439,11 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
     source = np.array(source)
     response = np.array(response)
     
-    #normalize to -1,1
+    #normalize to -1,1 and 0 mean
     def normalize(arr):
-        return np.interp(arr,(arr.min(),arr.max()),(-1,1))
+        norm = np.interp(arr,(arr.min(),arr.max()),(-1,1))
+        norm = norm-norm.mean()
+        return norm
     
     memory = normalize(memory)
     source = normalize(source)
