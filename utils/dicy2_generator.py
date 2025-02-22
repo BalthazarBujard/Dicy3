@@ -415,20 +415,17 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
 
     prYellow("Concatenate response...")
     if save_concat_args : 
-        #folder_trackname --> moises : 45273_..._voix et cannone : A{i}_Duo2_1_guitare
-        #concat file name is the same as response fname
-        if "moises" in memory_path:
-            track_name = os.path.basename(os.path.dirname((os.path.dirname(memory_path)))) #track folder
-            instrument_name = os.path.basename(os.path.dirname(memory_path))
-            concat_file = f"{track_name}_{instrument_name}"
-        else :
-            A_name = os.path.basename(os.path.dirname(memory_path))
-            concat_file = f"{A_name}_{os.path.basename(memory_path).split('.')[0]}"
+        concat_file = os.path.basename(memory_path).split('.')[0]
         
         concat_file += ".npz"   
         save_concat_folder = Path(save_dir+f"/concat_args")
         os.makedirs(save_concat_folder, exist_ok=True)
         save_concat_path = save_concat_folder / concat_file
+        i=1
+        while save_concat_path.exists():
+            concat_file = f"{os.path.basename(memory_path).split('.')[0]}_{i}.npz"
+            save_concat_path = save_concat_folder / concat_file
+            i+=1
         
         response = save_and_concatenate(memory_chunks,queries,concat_fade_time,memory_ds.native_sr,remove,max_backtrack,save_concat_path)
     

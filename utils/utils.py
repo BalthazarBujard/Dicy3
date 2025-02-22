@@ -92,6 +92,7 @@ def lock_gpu(num_devices=1):
         
     devices=[]
     ids=[]
+    #if num_devices==1 and torch.cuda.is_available() : return torch.device("cuda"), -1 #dont lock twice for same device ?
     if manager:
         for i in range(num_devices):
             try:

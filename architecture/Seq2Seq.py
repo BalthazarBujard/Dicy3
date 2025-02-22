@@ -228,7 +228,7 @@ class Seq2SeqBase(nn.Module):
         
         return z_src, src_idx, src_pad_mask 
 
-    def _from_index_to_embedding(self,index:int):
+    def _from_index_to_embedding(self,index:int) -> torch.Tensor:
         special_tokens_idxs = torch.tensor(list(self.special_tokens_idx.values()),device=self.device)
         
         if index in special_tokens_idxs:
