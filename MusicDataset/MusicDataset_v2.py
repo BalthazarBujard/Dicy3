@@ -637,6 +637,7 @@ class MusicContainer4dicy2(Dataset):
         else :
             track,_ = load(track_path,sr=sampling_rate,mono=True,offset=t0,duration=duration)
             native_track, native_sr = load(track_path,sr=None,mono=True,offset=t0,duration=duration)
+        
         #apply padding to have track duration every time --> TODO : change generation code or smthing else so that we can give any track
         r = len(track)%int(track_duration*sampling_rate)
         if r>0: #track duration less than track_duration
@@ -646,6 +647,10 @@ class MusicContainer4dicy2(Dataset):
             r_nat = len(native_track)%int(track_duration*native_sr)
             pad_native = int(track_duration*native_sr)-r_nat
             native_track = np.concatenate([native_track,np.zeros(pad_native)])
+        
+        #zero-mean
+        track = track - np.mean(track)
+        native_track = native_track - np.mean(native_track)
         
         self.track = track 
         self.native_track = native_track
