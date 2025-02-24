@@ -99,8 +99,8 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
 
             #choose memory and source
             id = np.random.randint(0,len(tracks))
-            memory = tracks[id] 
-            src = [tracks[i] for i in range(len(tracks)) if i != id ]
+            memory = Path(tracks[id])
+            src = [Path(tracks[i]) for i in range(len(tracks)) if i != id ]
             
             generate_example(model, memory, src, 
                              track_duration,chunk_duration,segmentation,pre_segmentation,
