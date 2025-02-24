@@ -360,20 +360,20 @@ def concatenate_response(memory_chunks:List,
     return response
 
 @torch.no_grad()
-def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2SeqBase,str],
+def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq2SeqBase,Path],
                       k:int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool,
                       max_track_duration:float,max_chunk_duration:float,
                       track_segmentation:str, chunk_segmentation:str,
                       compute_accuracy : bool,
                       entropy_weight : float = 0,
                       batch_size : int = 8,
-                      concat_fade_time=0.04, remove=False, max_backtrack = None,
-                      device=None,
-                      sampling_rate=16000, tgt_sampling_rates : dict = {'solo':None,'mix':None},
-                      max_output_duration=None, mix_channels=2, timestamps=[None,None],
-                      save_files=True,
-                      save_dir='output',
-                      save_concat_args = False):
+                      concat_fade_time : float = 0.04, remove : bool =False, max_backtrack : float = None,
+                      device : Optional[torch.device] = None,
+                      sampling_rate : int = 16000, tgt_sampling_rates : dict = {'solo':None,'mix':None},
+                      max_output_duration : float = None, mix_channels : int = 2, timestamps=[None,None],
+                      save_files : bool = True,
+                      save_dir : Path = Path('output'),
+                      save_concat_args : bool = False):
     
     if chunk_segmentation=='onset':
         raise ValueError("Concatenation algorithm not compatible with 'onset' segmentation")
@@ -394,7 +394,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
                                     timestamps=timestamps[1])
 
     #load model if checkpoint path is given
-    if isinstance(model,str):
+    if isinstance(model,Path):
         prYellow("Loading model from checkpoint...")
         model = load_model_checkpoint(model)
         model.eval()
@@ -415,15 +415,15 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
 
     prYellow("Concatenate response...")
     if save_concat_args : 
-        concat_file = os.path.basename(memory_path).split('.')[0]
+        concat_file = memory_path.stem
         
         concat_file += ".npz"   
-        save_concat_folder = Path(save_dir+f"/concat_args")
+        save_concat_folder = save_dir / "concat_args" #Path(save_dir+f"/concat_args")
         os.makedirs(save_concat_folder, exist_ok=True)
         save_concat_path = save_concat_folder / concat_file
         i=1
         while save_concat_path.exists():
-            concat_file = f"{os.path.basename(memory_path).split('.')[0]}_{i}.npz"
+            concat_file = f"{memory_path.stem}_{i}.npz"
             save_concat_path = save_concat_folder / concat_file
             i+=1
         
@@ -505,9 +505,9 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         prYellow("Saving files...")
         
         #folder_trackname --> moises : 45273_..._voix et cannone : A{i}_Duo2_1_guitare
-        if "moises" in memory_path:
-            track_name = os.path.basename(os.path.dirname((os.path.dirname(memory_path)))) #track folder
-            instrument_name = os.path.basename(os.path.dirname(memory_path))
+        if "moises" in str(memory_path):
+            track_name = memory_path.parents[1].stem #os.path.basename(os.path.dirname((os.path.dirname(memory_path)))) #track folder
+            instrument_name = memory_path.parent.stem #os.path.basename(os.path.dirname(memory_path))
             memory_name = f"{track_name}_{instrument_name}"
         else :
             A_name = os.path.basename(os.path.dirname(memory_path))
@@ -516,7 +516,7 @@ def generate(memory_path:str, src_path:Union[str,list[str]], model:Union[Seq2Seq
         save_file(save_dir,"memory",memory_name,memory,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'])
 
         #source_name = directory if moises, track name if canonne
-        if "moises" in src_path[0]:
+        if "moises" in str(src_path[0]):
             track_name = os.path.basename(os.path.dirname((os.path.dirname(src_path[0])))) #track folder
             #instrument_name = os.path.basename(os.path.dirname(src_path[0]))
             source_name = f"{track_name}"

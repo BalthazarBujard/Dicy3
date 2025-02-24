@@ -11,7 +11,7 @@ from top_k_validity import compute_similarity
 from tqdm import tqdm
 import numpy as np 
 from pathlib import Path
-from typing import Union, List
+from typing import Union, List, Optional
 from librosa import load
 from munch import Munch
 import glob
@@ -21,6 +21,70 @@ import datetime
 from itertools import permutations
 
 
+def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int, device : torch.cuda.device, 
+                        decoding : str = "greedy", temperature : float = 1, entropy_weight : float = 0):
+    model.eval()
+    acc=0
+    diversity = 0 #predicted tokens entropy
+    cosine_sim = 0
+    
+    accs = []
+    divs = []
+    perplexs=[]
+    
+    eos_idx = model.special_tokens_idx["eos"].to(device)
+    codebook = model.vocab_embedding_table
+    
+    with torch.no_grad():
+        for _ in tqdm(range(len(eval_fetcher))):
+            inputs = next(eval_fetcher)
+            
+            
+            src, tgt, src_pad_mask, tgt_pad_mask, _ = inputs.values()
+            #generate output
+            generated_tgt, generated_tgt_idx, probs = model.generate(src,src_pad_mask,k,
+                                                     decoding_type=decoding,
+                                                     max_len=src.size(1),
+                                                     temperature=temperature,
+                                                     entropy_weight=entropy_weight)
+            
+            
+
+            gt_tgt_idx = model.encode(tgt,tgt_pad_mask)[1]
+            
+            #remove <sos>
+            tgt_out = gt_tgt_idx[:,1:] 
+            generated_tgt_idx = generated_tgt_idx[:,1:]
+            
+            
+            #compute perplexity of predicted sequence
+            preds_probs = probs.reshape(-1,probs.size(-1)).gather(1,generated_tgt_idx.unsqueeze(1)).squeeze(1) #retrieve logits of predicted tokens (B*T,)
+            avg_nll = -sum(torch.log(preds_probs))/len(preds_probs)
+            ppl = avg_nll.exp()
+            perplexs.append(ppl.item())
+            
+            preds = generated_tgt_idx.reshape(-1) #(B*T,)
+            
+            #accuracy with topK
+            accs.append(compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=model.special_tokens_idx["pad"]))
+            
+            #diversity of pred
+            divs.append(compute_entropy(preds,min_length=model.vocab_size).item())
+            
+    
+    acc = np.mean(accs)
+    acc_std = np.std(accs)
+    
+    diversity = np.mean(divs)
+    diversity_std = np.std(divs)
+    
+    perplexity = np.mean(perplexs)
+    perplexity_std = np.std(perplexs)
+    
+    return Munch(accuracy={"mean":acc,"std":acc_std},
+                 diversity={"mean":diversity,"std":diversity_std},
+                 perpleity={"mean":perplexity,"std":perplexity_std})
+    
     
 
 #this function evaluates the Decision module and the perception's quantized encoding
@@ -109,7 +173,7 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device :
                  codebook_usage = {"mean":codebook_usage,"std":codebook_usage_std},
                  topK_sim = {"mean":cosine_sim,"std":cosine_sim_std})
 
-def generate_eval_examples(tracks_list : List[List], 
+def generate_eval_examples(tracks_list : List[List[Path]], 
                            model : Seq2SeqCoupling, 
                            k : int, with_coupling : bool, decoding_type : str, temperature : float, force_coupling : bool, 
                            track_duration : float, chunk_duration : float, 
@@ -171,8 +235,8 @@ def parse_args():
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', choices=['all','model','quality','apa','similarity','none'],nargs="*")
-    parser.add_argument('--model_ckp',nargs='*')
-    parser.add_argument("--model_ckps_folder",type=str,default=None)
+    parser.add_argument('--model_ckp',nargs='*',type = List[Path])
+    parser.add_argument("--model_ckps_folder",type=Path,default=None)
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
     parser.add_argument("--split", choices = ['val','val_subset','test'])
     parser.add_argument('--k',type=float, default=5)
@@ -183,16 +247,16 @@ def parse_args():
     parser.add_argument("--decoding_type",type=str,choices=['greedy','beam'])
     parser.add_argument("--force_coupling",action='store_true')
     parser.add_argument("--temperature",type=float, default=1.)
-    parser.add_argument("--max_duration",type=float,default=60)
     parser.add_argument("--smaller",action='store_true')
+    parser.add_argument("--max_duration",type=float,default=None)
     parser.add_argument("--crossfade_time",type=float,default=0.05)
     parser.add_argument("--apa_emb",type=str,choices=["CLAP","L-CLAP"], default = "CLAP")
     parser.add_argument("--fad_inf",action="store_true")
     #here you can specify "memory" or "original" for baseline evaluation
-    parser.add_argument("--quality_tgt_folder",default=None, help="target folder ofr generated samples to evaluate audio quality of the model") 
-    parser.add_argument("--apa_tgt_folder",default=None, help="target folder to generated to evaluate apa")
-    parser.add_argument("--similarity_tgt_folder",default=None, help="target folder to evaluate music similarity")
-    parser.add_argument("--similarity_gt_folder",default=None, help="ground truth folder to evaluate music similarity")
+    parser.add_argument("--quality_tgt_folder",default=None, type = Optional[Path], help="target folder ofr generated samples to evaluate audio quality of the model") 
+    parser.add_argument("--apa_tgt_folder",default=None, type = Optional[Path], help="target folder to generated to evaluate apa")
+    parser.add_argument("--similarity_tgt_folder",default=None, type = Optional[Path], help="target folder to evaluate music similarity")
+    parser.add_argument("--similarity_gt_folder",default=None, type = Optional[Path], help="ground truth folder to evaluate music similarity")
     args = parser.parse_args()
     
     del parser 
@@ -210,10 +274,11 @@ def main():
         assert args.model_ckps_folder != None, "If no model ckp given, specify folder containing all the models to evaluate."
         
         #find all ckp (*.pt) in the folder recursively
-        model_ckps = sorted(glob.glob(f"{args.model_ckps_folder}/**/*.pt",recursive=True))
+        p :Path = args.model_ckps_folder
+        model_ckps = sorted(p.glob("**/*.pt")) #sorted(glob.glob(f"{args.model_ckps_folder}/**/*.pt",recursive=True))
         
     else :
-        model_ckps=args.model_ckp #with nargs=* --> always as list
+        model_ckps : List[Path] = args.model_ckp #with nargs=* --> always as list
 
 
     if args.k>=1: 
@@ -223,19 +288,20 @@ def main():
     pre_segmentation = "uniform" if not args.sliding else "sliding"
     
     for model_ckp in model_ckps:
-        prYellow(os.path.basename(model_ckp))        
+        #prYellow(os.path.basename(model_ckp))
+        prYellow(model_ckp.name)        
         
         #extract data
         
         if args.data == 'canonne':
-            duos=f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{args.split}"
-            duos = [os.path.join(duos,A) for A in os.listdir(duos)]           
+            duos=Path(f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Duos/separate_and_csv/separate tracks/{args.split}")
+            duos = [duos.joinpath(A) for A in os.listdir(duos)] #[os.path.join(duos,A) for A in os.listdir(duos)]           
             
-            trios = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{args.split}"
-            trios = [os.path.join(trios,A) for A in os.listdir(trios)]
+            trios = Path(f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{args.split}")
+            trios = [trios.joinpath(A) for A in os.listdir(trios)] #[os.path.join(trios,A) for A in os.listdir(trios)]
         
         elif args.data == 'moises':
-            moisesdb_val = f"../data/moisesdb_v2/{args.split}"
+            moisesdb_val = Path(f"../data/moisesdb_v2/{args.split}")
             moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=['drums','percussion','other'])
         
         if 'all' in args.task:
@@ -258,17 +324,10 @@ def main():
         
         k_fname = f"k_{int(args.k)}" if args.k>=1 else f"p_{int(args.k*100)}%"
         
-        save_dir = os.path.join(dir,f'evaluation/{os.path.basename(model_ckp).split(".pt")[0]}/{args.split}/{args.data}/{k_fname}')
-        
-        # new_save_dir =  save_dir
-        # idx=1
-        # while os.path.exists(new_save_dir):
-        #     new_save_dir=save_dir + f" {idx}"
-        #     idx+=1
-        # save_dir = new_save_dir
+        save_dir = Path(dir+f'/evaluation/{model_ckp.stem}/{args.split}/{args.data}/{k_fname}') #os.path.join(dir,f'evaluation/{model_ckp.stem}/{args.split}/{args.data}/{k_fname}')
         
         os.makedirs(save_dir,exist_ok=True)
-        eval_file = os.path.join(save_dir,"eval.txt")
+        eval_file = save_dir.joinpath("eval.txt") #os.path.join(save_dir,"eval.txt")
         
         #depends on dataset and split
         dataset = 'moisesdb_v2' if args.data == 'moises' else 'BasesDeDonnees'
@@ -297,8 +356,8 @@ def main():
                 
             elif args.data == 'canonne':
                 #get all tracks in each duo
-                dA1_tracks = sorted(glob.glob(duos[0]+'/*.wav'))
-                dA2_tracks = sorted(glob.glob(duos[1]+'/*.wav'))
+                dA1_tracks = sorted(duos[0].glob('*.wav')) #sorted(glob.glob(duos[0]+'/*.wav'))
+                dA2_tracks = sorted(duos[1].glob('*.wav')) #sorted(glob.glob(duos[1]+'/*.wav'))
                 
                 duos_tracks = [[t1,t2] for t1,t2 in zip(dA1_tracks,dA2_tracks)]
 
@@ -312,11 +371,11 @@ def main():
                 
                 
                 #get all tracks in each trio
-                dA1_tracks = sorted(glob.glob(trios[0]+'/*.wav'))
-                dA2_tracks = sorted(glob.glob(trios[1]+'/*.wav'))
-                dA3_tracks = sorted(glob.glob(trios[2]+'/*.wav'))   
+                tA1_tracks = sorted(trios[0].glob('/*.wav')) #sorted(glob.glob(trios[0]+'/*.wav'))
+                tA2_tracks = sorted(trios[1].glob('/*.wav')) #sorted(glob.glob(trios[1]+'/*.wav'))
+                tA3_tracks = sorted(trios[2].glob('/*.wav')) #sorted(glob.glob(trios[2]+'/*.wav'))   
                 
-                trios_tracks = [[t1,t2,t3] for t1,t2,t3 in zip(dA1_tracks,dA2_tracks,dA3_tracks)]
+                trios_tracks = [[t1,t2,t3] for t1,t2,t3 in zip(tA1_tracks,tA2_tracks,tA3_tracks)]
                 
                 generate_eval_examples(
                                         trios_tracks,model,k,args.with_coupling,
@@ -362,13 +421,13 @@ def main():
             #get the tgt folder if not given
             tgt_folder = args.quality_tgt_folder
             if tgt_folder == None:
-                tgt_folder = os.path.join(save_dir,"response")
+                tgt_folder = save_dir.joinpath("response") #os.path.join(save_dir,"response")
             
-            #for badeline
+            #for baseline
             if tgt_folder == "memory":
-                tgt_folder=os.path.join(save_dir,"memory")
+                tgt_folder = save_dir.joinpath("memory") #os.path.join(save_dir,"memory")
             
-            if not os.path.exists(tgt_folder):
+            if not tgt_folder.exist() : #os.path.exists(tgt_folder):
                 raise RuntimeError("Wrong or no corresponding folder for audio quality measure. Please generate audio or use '--generate'")
             
             
@@ -391,13 +450,13 @@ def main():
             tgt_folder = args.apa_tgt_folder
             if tgt_folder == None:
                 #get mix folder 
-                tgt_folder = os.path.join(save_dir,"mix")
+                tgt_folder = save_dir.joinpath("mix") #os.path.join(save_dir,"mix")
             
             #for baseline 
             elif tgt_folder == "original":
-                tgt_folder == os.path.join(save_dir,"original")
+                tgt_folder == save_dir.joinpath("original") #os.path.join(save_dir,"original")
             
-            if not os.path.exists(tgt_folder):
+            if not tgt_folder.exists():
                 raise RuntimeError("Wrong or no corresponding folder for APA measure. Please generate audio with '--generate'")
             
             

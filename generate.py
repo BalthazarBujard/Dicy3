@@ -8,7 +8,7 @@ import argparse
 from librosa import load
 import glob
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 def generate_example(model,memory : Path, src : List[Path], track_duration : float, chunk_duration : float, segmentation, pre_segmentation,
                      with_coupling,remove,k, decoding_type, temperature, force_coupling,
@@ -110,14 +110,14 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
         
 
     elif data == 'moises':
-        root= f"../data/moisesdb_v2/{val_folder}"
-        track_folders = [os.path.join(root,track) for track in os.listdir(root)]
+        root= Path(f"../data/moisesdb_v2/{val_folder}")
+        track_folders = list(root.iterdir())#[os.path.join(root,track) for track in os.listdir(root)]
         idxs = np.random.choice(range(len(track_folders)),size=num_examples,replace=False)
         for idx in idxs:
             track_folder = track_folders[idx]
+
             tracks = extract_group(track_folder,instruments_to_ignore=["other","drums","percussion"])
             #print("\n".join(tracks))
-
 
             #choose memory and source
             id= np.random.randint(0,len(tracks))
@@ -138,8 +138,8 @@ if __name__=='__main__':
     DEVICE = DEVICES[0]
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_ckp",type=str,nargs="*")
-    parser.add_argument("--model_ckps_folder",type=str)
+    parser.add_argument("--model_ckp",type=Path,nargs="*")
+    parser.add_argument("--model_ckps_folder",type=Path)
     parser.add_argument("--batch_size",type=int,default=8)
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
@@ -155,9 +155,9 @@ if __name__=='__main__':
     parser.add_argument("--max_duration",type=float, default=60.)
     parser.add_argument("--data", choices = ["canonne","canonne_duos","canonne_trios","moises"])
     parser.add_argument("--from_subset", action = 'store_true')
-    parser.add_argument('--memory')
-    parser.add_argument('--source',nargs='*')
-    parser.add_argument("--save_dir")
+    parser.add_argument('--memory', type=Path)
+    parser.add_argument('--source',nargs='*', type=List[Path])
+    parser.add_argument("--save_dir", type=Path)
     parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
     parser.add_argument("-accuracy","--compute_accuracy",action = "store_true")
     parser.add_argument("--save_concat_args", action = "store_true", help = "if True : save concatenation arguments for easier modification of parameters and arguments")
@@ -168,7 +168,8 @@ if __name__=='__main__':
     # If a file with checkpoint paths is provided, read it and add to model_ckp
     if args.model_ckps_folder:
         #find all ckp (*.pt) in the folder recursively
-        model_ckps = sorted(glob.glob(f"{args.model_ckps_folder}/**/*.pt",recursive=True))
+        ckps_folder : Path = args.model_ckps_folder
+        model_ckps = sorted(ckps_folder.glob("**/*.pt")) #sorted(glob.glob(f"{args.model_ckps_folder}/**/*.pt",recursive=True))
         
     elif args.model_ckp:
         model_ckps=args.model_ckp
@@ -176,10 +177,10 @@ if __name__=='__main__':
     else : raise ValueError("Either give a checkpoint file or a model checkpoint")
     
     for model_ckp in model_ckps:
-        print("Generating with model :",os.path.basename(model_ckp))
+        print("Generating with model :",model_ckp.name)
         
-        save_dir = "output" if args.save_dir==None else args.save_dir
-        save_dir = os.path.join(save_dir,os.path.basename(model_ckp).split(".pt")[0]) 
+        save_dir = Path("output") if args.save_dir==None else args.save_dir
+        save_dir = save_dir.joinpath(model_ckp.name) #os.path.join(save_dir,os.path.basename(model_ckp).split(".pt")[0]) 
         os.makedirs(save_dir,exist_ok=True)
         
         model, params, _ = load_model_checkpoint(model_ckp)

@@ -22,7 +22,7 @@ class myDDP(DDP):
 #script to build different models and load checkpopints
 
 #TODO : NOW THE SEQ2SEQ BUILDER CAN TAKE **KWARGS FROM DICT
-def load_model_checkpoint(ckp_path:str, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Tuple[Union[Seq2SeqBase,Seq2SeqCoupling], dict, dict] :
+def load_model_checkpoint(ckp_path:Path, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Tuple[Union[Seq2SeqBase,Seq2SeqCoupling], dict, dict] :
     
     ckp = torch.load(ckp_path, map_location=torch.device("cpu"))
     model_class = ckp["model_class"]

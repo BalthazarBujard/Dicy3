@@ -536,7 +536,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
     @torch.no_grad 
     def generate(self,src : torch.Tensor ,src_pad_masks : List[torch.Tensor], 
                  k : int, decoding_type : str, max_len : Optional[int] = None, 
-                 temperature : float = 1, entropy_weight : float = 0) -> Tuple[torch.Tensor,torch.Tensor]:
+                 temperature : float = 1, entropy_weight : float = 0) -> Tuple[torch.Tensor,torch.Tensor, torch.Tensor]:
         
         encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
         
