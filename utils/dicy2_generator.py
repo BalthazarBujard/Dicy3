@@ -515,8 +515,9 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
             memory_name = f"{A_name}_{memory_path.stem}" 
         
         if easy_name : memory_name = "memory" 
-         
-        save_file(save_dir,"memory",memory_name,memory,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'])
+        
+        memory_folder = None if easy_name else "memory"
+        save_file(save_dir,memory_folder,memory_name,memory,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'], make_unique = not easy_name)
 
         #source_name = directory if moises, track name if canonne
         if "moises" in str(src_path[0]):
@@ -534,21 +535,25 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
             else : source_name = f"{src_path[0].stem}"  #folder name
         
         if easy_name : source_name = "guide"
-              
-        save_file(save_dir,"source",source_name,source,"wav",orig_rate=src_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'])
+        
+        source_folder = None if easy_name else "source"
+        save_file(save_dir,source_folder,source_name,source,"wav",orig_rate=src_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'], make_unique = not easy_name)
         
         #use same name as memory for response --> crucial for evaluation
-        #response_name = memory_name + "_response"
-        save_file(save_dir,"response",memory_name,response,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'])
+        response_name = f"response_{max_chunk_duration}s_A{model.codebook_size}" if easy_name else memory_name 
+        response_folder = None if easy_name else "response"
+        save_file(save_dir,response_folder,response_name,response,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['solo'], make_unique = not easy_name)
         
         if easy_name :
             mix_name = f"{max_chunk_duration}s_A{model.codebook_size}"
         else : 
             mix_name = f"Cont_{source_name}_Mem_{memory_name}_A{model.codebook_size}_D{max_chunk_duration}_K{k}"
-        save_file(save_dir,"mix",mix_name,mix,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['mix'])
+        mix_folder = None if easy_name else "mix"
+        save_file(save_dir,mix_folder,mix_name,mix,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['mix'], make_unique = not easy_name)
         
         original_name = "original" if easy_name else source_name
-        save_file(save_dir,"original",original_name,original,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['mix'])
+        original_folder = None if easy_name else "original"
+        save_file(save_dir,original_folder,original_name,original,"wav",orig_rate=memory_ds.native_sr,tgt_rate=tgt_sampling_rates['mix'], make_unique = not easy_name)
         
         save_file(save_dir,"query",f"{mix_name}",query,"txt",orig_rate=None,tgt_rate=None)
         idx = save_file(save_dir,"search_for",f"{mix_name}",search_for,"txt",orig_rate=None,tgt_rate=None)
@@ -566,15 +571,18 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
                  query = query)
 
 import torchaudio    
-def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate):
-    dir = os.path.join(dir,folder)
+def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate, make_unique=True):
+    if folder:
+        dir = os.path.join(dir,folder)
     os.makedirs(dir,exist_ok=True)
     idx=0
-    while True:
-        path = os.path.join(dir,f"{fname}_{idx}.{extension}")
-        if not os.path.exists(path):
-            break 
-        idx+=1
+    path = os.path.join(dir,f"{fname}.{extension}")
+    if make_unique:
+        while True:
+            path = os.path.join(dir,f"{fname}_{idx}.{extension}")
+            if not os.path.exists(path):
+                break 
+            idx+=1
     
     if extension == "wav":
         if tgt_rate != None and orig_rate != tgt_rate:

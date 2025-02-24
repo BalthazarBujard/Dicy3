@@ -19,7 +19,8 @@ def generate_example(model,memory : Path, src : List[Path], track_duration : flo
                      tgt_sampling_rates : dict = {'solo':None,'mix':None},
                      mix_channels : int = 2,
                      entropy_weight : float = 0,
-                     save_concat_args : bool = False
+                     save_concat_args : bool = False,
+                     easy_name : bool = False
                      ):
     
     #if device == None : device = lock_gpu[0][0]
@@ -43,7 +44,8 @@ def generate_example(model,memory : Path, src : List[Path], track_duration : flo
                     save_dir=save_dir, max_output_duration = max_duration,
                     tgt_sampling_rates=tgt_sampling_rates, mix_channels=mix_channels,
                     device=device,
-                    save_concat_args=save_concat_args
+                    save_concat_args=save_concat_args,
+                    easy_name=easy_name
                     )
 
 #Compute accuracy here is true because we use original memory and guide 
@@ -57,7 +59,8 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                       device=None, 
                       mix_channels=2, 
                       entropy_weight : float = 0.,
-                      save_concat_args : bool = False):
+                      save_concat_args : bool = False,
+                      easy_name : bool = False):
 
     #if device == None : device = lock_gpu[0][0]
     
@@ -105,8 +108,15 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
             generate_example(model, memory, src, 
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
-                             fade_time,save_dir,smaller,batch_size,max_duration=max_duration,compute_accuracy=True,device=device,
-                             mix_channels=mix_channels,entropy_weight=entropy_weight,save_concat_args=save_concat_args)
+                             fade_time,save_dir,
+                             smaller,batch_size,
+                             max_duration=max_duration,
+                             compute_accuracy=True,
+                             device=device,
+                             mix_channels=mix_channels,
+                             entropy_weight=entropy_weight,
+                             save_concat_args=save_concat_args,
+                             easy_name=easy_name)
         
 
     elif data == 'moises':
@@ -128,7 +138,11 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                              track_duration,chunk_duration,segmentation,pre_segmentation,
                              with_coupling,remove,k,decoding_type,temperature,force_coupling,
                              fade_time,save_dir,smaller,batch_size,max_duration=max_duration,
-                             compute_accuracy=True,device=device,entropy_weight=entropy_weight,save_concat_args=save_concat_args)
+                             compute_accuracy=True,
+                             device=device,
+                             entropy_weight=entropy_weight,
+                             save_concat_args=save_concat_args,
+                             easy_name = easy_name)
     
 
 if __name__=='__main__':
@@ -152,7 +166,7 @@ if __name__=='__main__':
     parser.add_argument("--sliding", action = "store_true")
     parser.add_argument("--num_examples",type=int, default=1)
     parser.add_argument("--smaller",action='store_true')
-    parser.add_argument("--max_duration",type=float, default=60.)
+    parser.add_argument("--max_duration",type=float, default=None)
     parser.add_argument("--data", choices = ["canonne","canonne_duos","canonne_trios","moises"])
     parser.add_argument("--from_subset", action = 'store_true')
     parser.add_argument('--memory', type=Path)
@@ -161,6 +175,7 @@ if __name__=='__main__':
     parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
     parser.add_argument("-accuracy","--compute_accuracy",action = "store_true")
     parser.add_argument("--save_concat_args", action = "store_true", help = "if True : save concatenation arguments for easier modification of parameters and arguments")
+    parser.add_argument("--easy_name", action = 'store_true')
     args = parser.parse_args()
     
     
@@ -180,7 +195,8 @@ if __name__=='__main__':
         print("Generating with model :",model_ckp.name)
         
         save_dir = Path("output") if args.save_dir==None else args.save_dir
-        save_dir = save_dir.joinpath(model_ckp.name) #os.path.join(save_dir,os.path.basename(model_ckp).split(".pt")[0]) 
+        if not args.easy_name :
+            save_dir = save_dir.joinpath(model_ckp.name) #os.path.join(save_dir,os.path.basename(model_ckp).split(".pt")[0]) 
         os.makedirs(save_dir,exist_ok=True)
         
         model, params, _ = load_model_checkpoint(model_ckp)
@@ -209,7 +225,8 @@ if __name__=='__main__':
                             device=DEVICE,
                             mix_channels=args.mix_channels,
                             entropy_weight = args.entropy_weight,
-                            save_concat_args=args.save_concat_args)
+                            save_concat_args=args.save_concat_args,
+                            easy_name = args.easy_name)
         
         elif args.memory!=None and args.source!=None:
             generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
@@ -223,6 +240,7 @@ if __name__=='__main__':
                             device=DEVICE,
                             mix_channels=args.mix_channels, 
                             entropy_weight=args.entropy_weight,
-                            save_concat_args=args.save_concat_args)
+                            save_concat_args=args.save_concat_args,
+                            easy_name = args.easy_name)
             
         else : raise ValueError("Either specify 'data' or give a source and memory path")
