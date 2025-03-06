@@ -14,7 +14,6 @@ def train_parser():
     parser.add_argument('--pre_post_chunking',type = str, choices=['pre','post'], default = 'post')
     parser.add_argument('-dir','--direction',type=str,choices=["stem","mix"],default="stem")
     parser.add_argument('--dim', type = int, choices=[256,768], default=768)
-    #parser.add_argument('--ignore',type=list,nargs='*',default=["drums", "percussions", "other"]) #problem passing this arg
     parser.add_argument('--freeze_backbone',action='store_true')
     #prRed("TRAINIGN BACKBONE")
     parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],required=True)

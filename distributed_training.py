@@ -11,6 +11,7 @@ from utils.coupling_ds_generator import extract_all_groups
 from trainer import Seq2SeqTrainer
 from MusicDataset.MusicDataset_v2 import MIN_RESOLUTION
 import math
+from pathlib import Path
 
 #global var
 SAMPLING_RATE = 16000 #sampling rate for wav2vec2 bb model. shouldn't be changed !
@@ -93,7 +94,7 @@ def build_ds(args):
     T_A2 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A2"
     T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A3"
 
-    moisesdb_train = f"../data/moisesdb_v2/{train_set}"
+    moisesdb_train = Path(f"../data/moisesdb_v2/{train_set}")
     moises_tracks = extract_all_groups(moisesdb_train,instruments_to_ignore=["drums", "percussions", "other"])
     
     
@@ -113,7 +114,7 @@ def build_ds(args):
     T_A2 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A2"
     T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A3"
 
-    moisesdb_val = f"../data/moisesdb_v2/{val_set}"
+    moisesdb_val = Path(f"../data/moisesdb_v2/{val_set}")
     moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=["drums", "percussions", "other"])
 
 

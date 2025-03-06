@@ -144,20 +144,14 @@ def generate_examples(model, chunk_duration, track_duration, segmentation, pre_s
                              save_concat_args=save_concat_args,
                              easy_name = easy_name)
     
-
-if __name__=='__main__':
-    
-    from utils.utils import lock_gpu
-    DEVICES,_=lock_gpu()
-    DEVICE = DEVICES[0]
-    
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_ckp",type=Path,nargs="*")
     parser.add_argument("--model_ckps_folder",type=Path)
     parser.add_argument("--batch_size",type=int,default=8)
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--remove",action='store_true')
-    parser.add_argument("-decoding","--decoding_type", type = str, choices=['greedy','beam'])
+    parser.add_argument("-decoding","--decoding_type", type = str, choices=['greedy','beam'], default = "greedy")
     parser.add_argument("--temperature", type = float, default=1.)
     parser.add_argument("--entropy_weight",type=float,default=0.)
     parser.add_argument("--k",type=float,default=5)
@@ -170,7 +164,7 @@ if __name__=='__main__':
     parser.add_argument("--data", choices = ["canonne","canonne_duos","canonne_trios","moises"])
     parser.add_argument("--from_subset", action = 'store_true')
     parser.add_argument('--memory', type=Path)
-    parser.add_argument('--source',nargs='*', type=List[Path])
+    parser.add_argument('--source',nargs='*', type=Path)
     parser.add_argument("--save_dir", type=Path)
     parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
     parser.add_argument("-accuracy","--compute_accuracy",action = "store_true")
@@ -178,7 +172,15 @@ if __name__=='__main__':
     parser.add_argument("--easy_name", action = 'store_true')
     args = parser.parse_args()
     
+    return args
+
+if __name__=='__main__':
     
+    from utils.utils import lock_gpu
+    DEVICES,_=lock_gpu()
+    DEVICE = DEVICES[0]
+    
+    args = parse_args()
     
     # If a file with checkpoint paths is provided, read it and add to model_ckp
     if args.model_ckps_folder:

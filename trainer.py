@@ -244,7 +244,7 @@ class Seq2SeqTrainer(nn.Module):
             weights = 1/density
             weights = weights/sum(weights)
         
-        loss_ce = self.criterion(y, gt,ignore_index = pad_idx, weight = weights) #reshqaped as (B*T,vocab_size) and (B*T,)
+        loss_ce = self.criterion(y, gt,ignore_index = pad_idx, weight = weights, label_smoothing=0.1) #reshqaped as (B*T,vocab_size) and (B*T,)
         
         loss_commit = self.codebook_loss_alpha*codebook_loss
         

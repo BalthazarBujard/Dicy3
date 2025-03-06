@@ -292,6 +292,7 @@ class Seq2SeqBase(nn.Module):
             #apply temperature
             logits = logits/temperature
             
+            #append new probs
             probs = torch.cat([probs,logits.softmax(-1)],dim=1)
             
             tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None #(B,1)
@@ -536,11 +537,11 @@ class Seq2SeqCoupling(Seq2SeqBase):
     @torch.no_grad 
     def generate(self,src : torch.Tensor ,src_pad_masks : List[torch.Tensor], 
                  k : int, decoding_type : str, max_len : Optional[int] = None, 
-                 temperature : float = 1, entropy_weight : float = 0) -> Tuple[torch.Tensor,torch.Tensor, torch.Tensor]:
+                 temperature : float = 1, entropy_weight : float = 0, tgt_gt : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,torch.Tensor, torch.Tensor]:
         
         encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
         
-        tgt, tgt_idx, probs = self.coupling(encoded_src, src_pad_mask, k, max_len, decoding_type, temperature, None, entropy_weight) #generate sequence of expected labels for coupling
+        tgt, tgt_idx, probs = self.coupling(encoded_src, src_pad_mask, k, max_len, decoding_type, temperature, tgt_gt, entropy_weight) #generate sequence of expected labels for coupling
         
         return tgt, tgt_idx, probs #tgt probably not used but not bad idea    
         
