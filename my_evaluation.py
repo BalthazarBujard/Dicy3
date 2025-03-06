@@ -26,14 +26,10 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
     model.eval()
     acc=0
     diversity = 0 #predicted tokens entropy
-    cosine_sim = 0
     
     accs = []
     divs = []
     perplexs=[]
-    
-    eos_idx = model.special_tokens_idx["eos"].to(device)
-    codebook = model.vocab_embedding_table
     
     with torch.no_grad():
         for _ in tqdm(range(len(eval_fetcher))):
@@ -41,24 +37,30 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
             
             
             src, tgt, src_pad_mask, tgt_pad_mask, _ = inputs.values()
+            
+            gt_tgt_idx = model.encode(tgt,tgt_pad_mask)[1]
+            
             #generate output
             generated_tgt, generated_tgt_idx, probs = model.generate(src,src_pad_mask,k,
                                                      decoding_type=decoding,
                                                      max_len=src.size(1),
                                                      temperature=temperature,
-                                                     entropy_weight=entropy_weight)
+                                                     entropy_weight=entropy_weight,
+                                                     tgt_gt=gt_tgt_idx)
             
             
 
-            gt_tgt_idx = model.encode(tgt,tgt_pad_mask)[1]
+            
             
             #remove <sos>
             tgt_out = gt_tgt_idx[:,1:] 
             generated_tgt_idx = generated_tgt_idx[:,1:]
+            probs = probs[:,1:]
             
+            #print(probs.shape,generated_tgt_idx.shape)
             
             #compute perplexity of predicted sequence
-            preds_probs = probs.reshape(-1,probs.size(-1)).gather(1,generated_tgt_idx.unsqueeze(1)).squeeze(1) #retrieve logits of predicted tokens (B*T,)
+            preds_probs = probs.reshape(-1,probs.size(-1)).gather(1,generated_tgt_idx.flatten().unsqueeze(1)).squeeze(1) #retrieve logits of predicted tokens (B*T,)
             avg_nll = -sum(torch.log(preds_probs))/len(preds_probs)
             ppl = avg_nll.exp()
             perplexs.append(ppl.item())
@@ -234,7 +236,7 @@ def parse_args():
         
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', choices=['all','model','quality','apa','similarity','none'],nargs="*")
+    parser.add_argument('--task', choices=['all','model', 'generation','quality','apa','similarity','none'],nargs="*")
     parser.add_argument('--model_ckp',nargs='*',type = List[Path])
     parser.add_argument("--model_ckps_folder",type=Path,default=None)
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
@@ -244,9 +246,10 @@ def parse_args():
     parser.add_argument("--generate",action='store_true')
     parser.add_argument("--with_coupling",action='store_true')
     parser.add_argument("--sliding",action='store_true')
-    parser.add_argument("--decoding_type",type=str,choices=['greedy','beam'])
+    parser.add_argument("--decoding_type",type=str,choices=['greedy','beam'], default='greedy')
     parser.add_argument("--force_coupling",action='store_true')
     parser.add_argument("--temperature",type=float, default=1.)
+    parser.add_argument("--entropy_weight",type=float,default=0.)
     parser.add_argument("--smaller",action='store_true')
     parser.add_argument("--max_duration",type=float,default=None)
     parser.add_argument("--crossfade_time",type=float,default=0.05)
@@ -281,9 +284,7 @@ def main():
         model_ckps : List[Path] = args.model_ckp #with nargs=* --> always as list
 
 
-    if args.k>=1: 
-        k = int(args.k)
-    else : k = args.k #total probability
+    
     
     pre_segmentation = "uniform" if not args.sliding else "sliding"
     
@@ -308,7 +309,7 @@ def main():
             args.task = ['model','quality','apa','similarity']
         
         #load model only for generation or model eval
-        if 'model' in args.task or args.generate:
+        if 'model' in args.task or 'generation' in args.task or args.generate:
             model,params,_ = load_model_checkpoint(model_ckp)
             model.has_masking=False #during evaluation model doesnt mask time indices
             model.to(device)
@@ -317,6 +318,12 @@ def main():
             track_duration = params['tracks_size']
             chunk_duration = params['chunk_size']
             segmentation_strategy = params['segmentation']
+            
+            if args.k>=1: 
+                k = int(args.k)
+            else : 
+                #k = args.k #total probability
+                k = round(args.k*model.codebook_size)
         
         
         path=os.path.abspath(__file__)
@@ -337,7 +344,7 @@ def main():
         
         #generate audio from corresponding data folder
         if args.generate:
-            generation_metadata={'task':'generate','k':k,"decoding type":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature, "sliding":args.sliding}
+            generation_metadata={'task':'generate','k':k,"decoding type":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature, "entropy_weight":args.entropy_weight, "sliding":args.sliding}
             save_to_file(generation_metadata,eval_file)
             
             prGreen("Generating audio...")
@@ -409,6 +416,35 @@ def main():
 
             #compute metrics
             output = evaluate_model(model,eval_fetcher,k,device)
+            
+            #save output to file
+            #save_to_file({'k':k},eval_file)
+            save_to_file(output,eval_file)
+        
+        if 'generation' in args.task:
+            prGreen("Evaluating symbolic generation...")
+            
+            model_eval_metadata = {'task':'generation',"k":k, "decoding":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature}
+            save_to_file(model_eval_metadata,eval_file)
+            
+            #evaliate code related metrics        
+            #load dataset 
+            if args.data == 'canonne':            
+                eval_roots = [duos,trios]
+            
+            elif args.data == 'moises':
+                eval_roots = moises_tracks
+            
+            eval_fetcher = build_coupling_ds(eval_roots,24,
+                                            track_duration,chunk_duration,
+                                            segmentation_strategy=segmentation_strategy,
+                                            pre_segmentation='uniform',
+                                            SAMPLING_RATE=16000,
+                                            direction="stem",distributed=False,device=device)
+            #eval_fetcher.device = device
+
+            #compute metrics
+            output = evaluate_generation(model, eval_fetcher, k, device, args.decoding_type, args.temperature, args.entropy_weight)
             
             #save output to file
             #save_to_file({'k':k},eval_file)
