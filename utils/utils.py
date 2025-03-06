@@ -92,7 +92,7 @@ def lock_gpu(num_devices=1):
         
     devices=[]
     ids=[]
-    #if num_devices==1 and torch.cuda.is_available() : return torch.device("cuda"), -1 #dont lock twice for same device ?
+    
     if manager:
         for i in range(num_devices):
             try:
@@ -347,6 +347,25 @@ def compute_consecutive_lengths(idxs : np.ndarray) -> List:
     
     for i in range(1, len(idxs)):
         if idxs[i] == idxs[i - 1]+1 and idxs[i-1]!=-1:  # Same segment, increase length
+            current_length += 1
+        else:  # New segment, save current length and reset
+            lengths.append(current_length)
+            current_length = 1
+    
+    # Append the last segment length
+    lengths.append(current_length)
+    
+    return lengths
+
+def compute_identical_idx_lengths(idxs : np.ndarray) -> List:
+    # if not idxs:
+    #     return []
+    
+    lengths = []
+    current_length = 1
+    
+    for i in range(1, len(idxs)):
+        if idxs[i] == idxs[i - 1]:  # Same segment, increase length
             current_length += 1
         else:  # New segment, save current length and reset
             lengths.append(current_length)

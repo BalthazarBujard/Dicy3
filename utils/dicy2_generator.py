@@ -416,15 +416,14 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
 
     prYellow("Concatenate response...")
     if save_concat_args : 
-        concat_file = memory_path.stem
+        concat_file = f"{memory_path.stem}_{max_chunk_duration}s_A{model.codebook_size}.npz"
         
-        concat_file += ".npz"   
         save_concat_folder = save_dir / "concat_args" #Path(save_dir+f"/concat_args")
         os.makedirs(save_concat_folder, exist_ok=True)
         save_concat_path = save_concat_folder / concat_file
         i=1
         while save_concat_path.exists():
-            concat_file = f"{memory_path.stem}_{i}.npz"
+            concat_file = f"{memory_path.stem}_{max_chunk_duration}s_{model.codebook_size}_{i}.npz"
             save_concat_path = save_concat_folder / concat_file
             i+=1
         
