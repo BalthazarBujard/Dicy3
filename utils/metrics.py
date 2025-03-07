@@ -18,7 +18,7 @@ def compute_accuracy(pred_sequence, gt_sequence, pad_idx):
     acc = correct/total
     return acc
 
-def compute_entropy(input,min_length):
+def compute_entropy(input : torch.Tensor, min_length : int) -> torch.Tensor:
     counts = torch.bincount(input=input,minlength=min_length)
     probs = counts/torch.sum(counts)
     
