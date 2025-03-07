@@ -247,7 +247,7 @@ class Seq2SeqBase(nn.Module):
         
         return embeddings
     
-    def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:Union[int,float], max_len : int,
+    def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:Union[int,float], max_len : Optional[int],
                          tgt_gt : torch.Tensor = None, temperature : float = 1.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:    
             
         B = memory.size(0)
@@ -533,13 +533,14 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         return tgt, tgt_idx, probs
     
-    #NOT USED AT THE MOMENT 
     @torch.no_grad 
     def generate(self,src : torch.Tensor ,src_pad_masks : List[torch.Tensor], 
                  k : int, decoding_type : str, max_len : Optional[int] = None, 
                  temperature : float = 1, entropy_weight : float = 0, tgt_gt : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,torch.Tensor, torch.Tensor]:
         
         encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
+        
+        if not max_len : max_len = encoded_src.size(1) #maximum generated sequence size is equal to size of input sequence
         
         tgt, tgt_idx, probs = self.coupling(encoded_src, src_pad_mask, k, max_len, decoding_type, temperature, tgt_gt, entropy_weight) #generate sequence of expected labels for coupling
         
