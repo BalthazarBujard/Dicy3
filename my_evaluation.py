@@ -323,7 +323,7 @@ def main():
                 k = int(args.k)
             else : 
                 #k = args.k #total probability
-                k = round(args.k*model.codebook_size)
+                k = round(args.k*model.codebook_size) #percentage of vocabulary size
         
         
         path=os.path.abspath(__file__)
@@ -560,6 +560,10 @@ def main():
             print(sims)
             #save to file
             save_to_file({"music_similarity (mean, std, median)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
+            
+            #save similarities to plot boxes if necessary
+            sims_path = eval_file.joinpath("music_similarities.npy")
+            np.save(sims_path,sims)
             
 
 
