@@ -184,7 +184,7 @@ class MusicContainer(Dataset):
     
     def __check_file(self,file_path,max_time=600.0):
         
-        label = file_path.replace("\\","/").split("/")[-2] 
+        label = str(file_path).replace("\\","/").split("/")[-2] 
         if label not in INSTRUMENT_LABELS:
             #check if filename in list (for musdb stem structure)
             fname=os.path.basename(file_path).split(".")[0] #get filename
@@ -231,7 +231,7 @@ class MusicContainer(Dataset):
                         audio_files.append([file_path, duration, label])
         
         elif os.path.isfile(path):
-            if path.lower().endswith(('.wav', '.aif', '.flac')): 
+            if str(path).lower().endswith(('.wav', '.aif', '.flac')): 
                 label, duration = self.__check_file(path,max_time)
                 if duration!=None and label not in self.ignore_instrument:
                     audio_files.append([path, duration, label])
