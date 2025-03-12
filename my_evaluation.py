@@ -4,7 +4,7 @@ import torch
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from architecture.Model import load_model_checkpoint
 from MusicDataset.MusicDataset_v2 import Fetcher
-from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality, evaluate_similarity
+from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality, evaluate_similarity, compute_consecutive_lengths
 from utils.utils import predict_topK_P,prGreen,build_coupling_ds, extract_memory_path,prYellow, find_non_empty
 from utils.coupling_ds_generator import extract_all_groups
 from top_k_validity import compute_similarity
@@ -21,7 +21,7 @@ import datetime
 from itertools import permutations
 
 
-def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int, device : torch.cuda.device, 
+def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,  force_coupling : bool,
                         decoding : str = "greedy", temperature : float = 1, entropy_weight : float = 0):
     model.eval()
     acc=0
@@ -46,7 +46,7 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
                                                      max_len=src.size(1),
                                                      temperature=temperature,
                                                      entropy_weight=entropy_weight,
-                                                     tgt_gt=gt_tgt_idx)
+                                                     tgt_gt=gt_tgt_idx if force_coupling else None)
             
             
 
@@ -207,11 +207,6 @@ def generate_eval_examples(tracks_list : List[List[Path]],
             print("Memory :",memory)
             print("Guide :", src)
         
-            # if smaller: #find small chunk in track
-            #     y,sr = load(src[np.random.randint(0,len(src))],sr=None)
-            #     t0,t1 = find_non_empty(y,max_duration,sr,return_time=True)
-            #     timestamps = [[t0/sr,t1/sr],[t0/sr,t1/sr]] #in seconds
-            # else : timestamps=[None,None]
             
             #generate
             generate_example(
@@ -236,8 +231,8 @@ def parse_args():
         
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', choices=['all','model', 'generation','quality','apa','similarity','none'],nargs="*")
-    parser.add_argument('--model_ckp',nargs='*',type = List[Path])
+    parser.add_argument('--task', choices=['all','model', 'symbolic_generation','quality','apa','similarity','none'],nargs="*")
+    parser.add_argument('--model_ckp',nargs='*',type = Path)
     parser.add_argument("--model_ckps_folder",type=Path,default=None)
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
     parser.add_argument("--split", choices = ['val','val_subset','test'])
@@ -256,10 +251,11 @@ def parse_args():
     parser.add_argument("--apa_emb",type=str,choices=["CLAP","L-CLAP"], default = "CLAP")
     parser.add_argument("--fad_inf",action="store_true")
     #here you can specify "memory" or "original" for baseline evaluation
-    parser.add_argument("--quality_tgt_folder",default=None, type = Optional[Path], help="target folder ofr generated samples to evaluate audio quality of the model") 
-    parser.add_argument("--apa_tgt_folder",default=None, type = Optional[Path], help="target folder to generated to evaluate apa")
-    parser.add_argument("--similarity_tgt_folder",default=None, type = Optional[Path], help="target folder to evaluate music similarity")
-    parser.add_argument("--similarity_gt_folder",default=None, type = Optional[Path], help="ground truth folder to evaluate music similarity")
+    parser.add_argument("--quality_tgt_folder",default=None, type = Path, help="target folder ofr generated samples to evaluate audio quality of the model") 
+    parser.add_argument("--apa_tgt_folder",default=None, type = Path, help="target folder to generated to evaluate apa")
+    parser.add_argument("--similarity_tgt_folder",default=None, type = Path, help="target folder to evaluate music similarity against groudn truth folder. Default is response folder")
+    parser.add_argument("--similarity_gt_folder",default=None, type = Path, help="ground truth folder to evaluate music similarity. Default is the memory folder of generated tracks.")
+    parser.add_argument("--root_folder", default = None, type = Path, help="root folder path")
     args = parser.parse_args()
     
     del parser 
@@ -268,11 +264,14 @@ def parse_args():
 
            
 def main():
-    
-    from utils.utils import lock_gpu
-    device = lock_gpu()[0][0]
-    
     args = parse_args()
+    
+    if "similarity" not in args.task:
+        from utils.utils import lock_gpu 
+        device = lock_gpu()[0][0]
+    else : device = None
+    
+    
     if args.model_ckp == None:
         assert args.model_ckps_folder != None, "If no model ckp given, specify folder containing all the models to evaluate."
         
@@ -306,10 +305,10 @@ def main():
             moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=['drums','percussion','other'])
         
         if 'all' in args.task:
-            args.task = ['model','quality','apa','similarity']
+            args.task = ['model', 'symbolic_generation', 'quality', 'apa', 'similarity']
         
-        #load model only for generation or model eval
-        if 'model' in args.task or 'generation' in args.task or args.generate:
+        #load model for generation or model eval
+        if 'model' in args.task or 'symbolic_generation' in args.task or args.generate:
             model,params,_ = load_model_checkpoint(model_ckp)
             model.has_masking=False #during evaluation model doesnt mask time indices
             model.to(device)
@@ -327,11 +326,16 @@ def main():
         
         
         path=os.path.abspath(__file__)
-        dir = os.path.dirname(path)
+        dir = Path(os.path.dirname(path))
+        eval_dir = dir.joinpath("evaluation")
+        
+        if args.root_folder != None:
+            eval_dir = eval_dir.joinpath(args.root_folder)
         
         k_fname = f"k_{int(args.k)}" if args.k>=1 else f"p_{int(args.k*100)}%"
         
-        save_dir = Path(dir+f'/evaluation/{model_ckp.stem}/{args.split}/{args.data}/{k_fname}') #os.path.join(dir,f'evaluation/{model_ckp.stem}/{args.split}/{args.data}/{k_fname}')
+        #TODO : change order for folder structure ?
+        save_dir = eval_dir.joinpath(f'{model_ckp.stem}/{args.split}/{args.data}/{k_fname}')
         
         os.makedirs(save_dir,exist_ok=True)
         eval_file = save_dir.joinpath("eval.txt") #os.path.join(save_dir,"eval.txt")
@@ -378,9 +382,9 @@ def main():
                 
                 
                 #get all tracks in each trio
-                tA1_tracks = sorted(trios[0].glob('/*.wav')) #sorted(glob.glob(trios[0]+'/*.wav'))
-                tA2_tracks = sorted(trios[1].glob('/*.wav')) #sorted(glob.glob(trios[1]+'/*.wav'))
-                tA3_tracks = sorted(trios[2].glob('/*.wav')) #sorted(glob.glob(trios[2]+'/*.wav'))   
+                tA1_tracks = sorted(trios[0].glob('*.wav')) #sorted(glob.glob(trios[0]+'/*.wav'))
+                tA2_tracks = sorted(trios[1].glob('*.wav')) #sorted(glob.glob(trios[1]+'/*.wav'))
+                tA3_tracks = sorted(trios[2].glob('*.wav')) #sorted(glob.glob(trios[2]+'/*.wav'))   
                 
                 trios_tracks = [[t1,t2,t3] for t1,t2,t3 in zip(tA1_tracks,tA2_tracks,tA3_tracks)]
                 
@@ -421,10 +425,10 @@ def main():
             #save_to_file({'k':k},eval_file)
             save_to_file(output,eval_file)
         
-        if 'generation' in args.task:
+        if 'symbolic_generation' in args.task:
             prGreen("Evaluating symbolic generation...")
             
-            model_eval_metadata = {'task':'generation',"k":k, "decoding":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature}
+            model_eval_metadata = {'task':'symbolic generation',"k":k, "decoding":args.decoding_type,"force_coupling":args.force_coupling,"temperature":args.temperature}
             save_to_file(model_eval_metadata,eval_file)
             
             #evaliate code related metrics        
@@ -444,13 +448,12 @@ def main():
             #eval_fetcher.device = device
 
             #compute metrics
-            output = evaluate_generation(model, eval_fetcher, k, device, args.decoding_type, args.temperature, args.entropy_weight)
+            output = evaluate_generation(model, eval_fetcher, k, args.force_coupling, args.decoding_type, args.temperature, args.entropy_weight)
             
             #save output to file
             #save_to_file({'k':k},eval_file)
             save_to_file(output,eval_file)
         
-        #if no folders are given use the ones form generation
         if 'quality' in args.task :
             prGreen("Evaluating audio quality...")
             
@@ -484,13 +487,15 @@ def main():
             prGreen("Evaluating APA...")
             
             tgt_folder = args.apa_tgt_folder
+            
             if tgt_folder == None:
                 #get mix folder 
                 tgt_folder = save_dir.joinpath("mix") #os.path.join(save_dir,"mix")
             
-            #for baseline 
-            elif tgt_folder == "original":
-                tgt_folder == save_dir.joinpath("original") #os.path.join(save_dir,"original")
+            #for baseline (higher bound)
+            if tgt_folder.name == "original":
+                tgt_folder = save_dir.joinpath("original") #os.path.join(save_dir,"original")
+            
             
             if not tgt_folder.exists():
                 raise RuntimeError("Wrong or no corresponding folder for APA measure. Please generate audio with '--generate'")
@@ -515,14 +520,16 @@ def main():
             prGreen("Evaluating Music Similarity...")
             
             tgt_folder = args.similarity_tgt_folder
-            
+                        
             #we need to iterate over the response folder
             if tgt_folder == None :
-                tgt_folder = os.path.join(save_dir,"response")
+                tgt_folder = save_dir.joinpath("response")
             
             #for baseline
-            if tgt_folder == "memory":
-                tgt_folder=os.path.join(save_dir,"memory")
+            if tgt_folder.name == "memory":
+                tgt_folder=save_dir.joinpath("memory")
+                
+            print(tgt_folder)
             
             if not os.path.exists(tgt_folder):
                 raise RuntimeError("Wrong or no corresponding folder for similarity measure. Please generate audio with '--generate'")    
@@ -532,16 +539,16 @@ def main():
             save_to_file(sim_metadata,eval_file)
             
             
-            targets = sorted(glob.glob(tgt_folder+'/*.wav'))
+            targets = sorted(tgt_folder.glob("*.wav")) #sorted(glob.glob(tgt_folder+'/*.wav'))
             
             gt_folder = args.similarity_gt_folder
             if gt_folder==None:
-                gt_folder = os.path.join(save_dir,"memory") #we use the memory folder to compute similarity
+                gt_folder =save_dir.joinpath("memory") #we use the memory folder to compute similarity
             
             if not os.path.exists(gt_folder):
                 raise RuntimeError("Wrong or no corresponding ground truth folder for similarity measure.")    
             
-            gts = sorted(glob.glob(gt_folder+'/*.wav'))
+            gts = sorted(gt_folder.glob("*.wav"))
 
             #compute similarity
             sims = []
@@ -562,8 +569,34 @@ def main():
             save_to_file({"music_similarity (mean, std, median)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
             
             #save similarities to plot boxes if necessary
-            sims_path = eval_file.joinpath("music_similarities.npy")
+            sims_path = save_dir.joinpath(f"music_similarities_{tgt_folder.name}_{datetime.datetime.now()}.npy")
             np.save(sims_path,sims)
+        
+        #compute consecutive chunk indexes
+        if 'consecutive_idxs' in args.task:
+            query_folder = save_dir.joinpath("query")
+            query_files = query_folder.glob("*.txt")
+            
+            #TODO : ADD OTHER STATS ?
+            #open files, load data
+            all_lengths = []
+            max_lengths = []
+            gt_lengths = []
+            for f in query_files:
+                idxs = np.loadtxt(f, dtype=int)
+                lengths = compute_consecutive_lengths(idxs)
+                all_lengths.extend(lengths)
+                max_lengths.extend(max(lengths))
+                gt_lengths.append(len(idxs))
+            
+            #compute statistics
+            lengths_histogram = np.bincount(all_lengths)
+            max_lengths_histogram = np.bincount(max_lengths)
+            
+            #save histogram for plot
+            consecutive_idxs_stats_path = save_dir.joinpath(f"consecutive_idxs_stats_{datetime.datetime.now()}.npy")
+            np.save(consecutive_idxs_stats_path,{"lengths_histogram":lengths_histogram,"max_lengths_histogram":max_lengths_histogram,"gt_lengths":gt_lengths})
+            
             
 
 
