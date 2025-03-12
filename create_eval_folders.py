@@ -377,7 +377,7 @@ def generate_apa_moises(moises_folders,distractors,bg_folder,mis_folder,idx=1):
         if pad>0 : #mix>yr
             y_r = np.concatenate([y_r,np.zeros(pad)])
         elif pad<0:
-            #crop y_r
+            #pad mix
             mix = np.concatenate([mix,np.zeros(-pad)])
         
         #normalize before summing for better bqlance of distractor and orig
