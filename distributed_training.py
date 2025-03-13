@@ -44,8 +44,8 @@ def build_model(args):
 
     #POS ENCODING
     div_term = MAX_CHUNK_DURATION if SEGMENTATION_STRATEGY in ['uniform','sliding'] else MIN_RESOLUTION
-    max_len = max(2000,int(math.ceil(MAX_TRACK_DURATION/div_term)+1 + 3)) #gives the max number of chunks per (sub-)track +1 cuz of padding of last track chunk +3 for special tokens
-
+    max_len = int(math.ceil(MAX_TRACK_DURATION/div_term)+1 + 10) #max len is the max number of chunks + some overhead #max(200,int(math.ceil(MAX_TRACK_DURATION/div_term)+1 + 3)) #gives the max number of chunks per (sub-)track +1 cuz of padding of last track chunk +3 for special tokens
+    
     encoder_head=args.encoder_head #COLLAPSE method
     condense_type=args.condense_type if encoder_head!='mean' else None
 
@@ -81,6 +81,8 @@ def build_model(args):
                                     decoder_only=decoder_only,
                                     inner_dim=inner_dim,
                                     heads=heads,
+                                    chunk_size=MAX_CHUNK_DURATION,
+                                    data = args.data
                                     )
     return seq2seq
 
@@ -128,7 +130,7 @@ def build_ds(args):
     return train_roots,val_roots
 
 # WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
-def setup(rank, world_size,mastr_port=12355):
+def setup(rank, world_size,mastr_port=12350):
     #mastr_port=torch.randint(12355,12360)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'

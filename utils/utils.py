@@ -6,6 +6,7 @@ from librosa import time_to_frames,frames_to_time
 from librosa.onset import onset_backtrack, onset_detect
 from typing import Optional, List
 from pathlib import Path
+import matplotlib.pyplot as plt
 #from essentia.standard import Windowing,FFT,CartesianToPolar,FrameGenerator,Onsets,OnsetDetection
 #import essentia 
 
@@ -159,7 +160,7 @@ def load_trained_backbone_from_classifier(pretrained_file, backbone_checkpoint="
     )
         
     return adapted_model, classifier
-
+#%%
 def random_sample(topK_idx : torch.Tensor):
     N,k = topK_idx.size()
     random_idx = torch.randint(0,k,size=(N,1),device=topK_idx.device)
@@ -177,8 +178,12 @@ def topK_search(k, logits : torch.Tensor, targets : Optional[torch.Tensor]=None)
         sampled_idx=torch.empty(B, dtype=torch.long, device = logits.device) # init empty tenosr
         for i,(topK_sample,tgt) in enumerate(zip(topK_idx,targets)):
             
-            if tgt in topK_sample:
-                sampled_idx[i]=tgt
+            # if tgt in topK_sample:
+            #     sampled_idx[i]=tgt
+            
+            idxs = torch.isin(topK_sample,tgt) #is there any occurence of tgt (set_size,) in topK_idxs (K,)
+            if any(idxs):
+                sampled_idx[i] = random_sample(topK_sample[idxs].unsqueeze(0)) #if so pick the one with highest probability
             
             else :
                 #random sample from that list
@@ -225,8 +230,11 @@ def topP_search(p: float, logits : torch.Tensor, targets : Optional[torch.Tensor
         sampled_idx=torch.empty(len(topP_idx), dtype=torch.long, device = logits.device) # init empty tenosr
         for i,(topP_sample,tgt) in enumerate(zip(topP_idx,targets)):
             
-            if tgt in topP_sample:
-                sampled_idx[i]=tgt
+            # if tgt in topP_sample:
+            #     sampled_idx[i]=tgt
+            idxs = torch.isin(topP_sample,tgt) #is there any occurence of tgt (set_size,) in topP_idxs (>=1,)
+            if any(idxs):
+                sampled_idx[i] = random_sample(topP_sample[idxs].unsqueeze(0)) #if so pick the one with highest probability
             
             else :
                 #random sample from that list
@@ -239,16 +247,26 @@ def topP_search(p: float, logits : torch.Tensor, targets : Optional[torch.Tensor
     return sampled_idx
 
 
-def predict_topK_P(k,logits : torch.Tensor, tgt : Optional[torch.Tensor]=None):
+def predict_topK_P(k,logits : torch.Tensor, tgt : Optional[torch.Tensor]=None, from_set = False):
     logits_rs = logits.reshape(-1,logits.size(-1)) #(B*T,vocab)
-    tgts_rs = tgt.reshape(-1) if tgt!=None else None #(B*T)
+    tgts_rs = None
+    if tgt != None:
+        if not from_set :
+            tgts_rs = tgt.reshape(-1).unsqueeze(1) #(B*T,set size)
+        else : 
+            #repeat set accross T
+            tgt = tgt.unsqueeze(1).repeat(1,logits.size(1),1)
+            tgts_rs = tgt.reshape(-1,tgt.shape[-1])
+    
+    #tgts_rs : (B*T,set size) with set_size = 1 in general and other when force coupling generation
+    
     if k>=1:
         preds = topK_search(k,logits_rs,tgts_rs)
     else :
         preds = topP_search(k,logits_rs, tgts_rs)
         
     return preds
-
+#%%
 def build_coupling_ds(roots : List[List[Path]], 
                       batch_size : int, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
                     segmentation_strategy="uniform",
@@ -376,6 +394,74 @@ def compute_identical_idx_lengths(idxs : np.ndarray) -> List:
     
     return lengths
 
+def broken_histogram_plot(histogram, y_break, title, label):
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    fig.subplots_adjust(hspace=0.1)  # adjust space between Axes
+
+    #plot data on same axis
+    ax1.bar(range(len(histogram)),histogram,label=label)
+    ax2.bar(range(len(histogram)),histogram)
+
+    #zoom in ax2
+    ax2.set_ylim(0,y_break)
+    #adjust ax1
+    ax1.set_ylim(y_break)
+
+    # hide the spines between ax and ax2
+    ax1.spines.bottom.set_visible(False)
+    ax2.spines.top.set_visible(False)
+    ax1.xaxis.tick_top()
+    ax1.tick_params(labeltop=False)  # don't put tick labels at the top
+    ax2.xaxis.tick_bottom()
+
+    d = .5  # proportion of vertical to horizontal extent of the slanted line
+    kwargs = dict(marker=[(-1, -d), (1, d)], markersize=12,
+                linestyle="none", color='k', mec='k', mew=1, clip_on=False)
+    ax1.plot([0, 1], [0, 0], transform=ax1.transAxes, **kwargs)
+    ax2.plot([0, 1], [1, 1], transform=ax2.transAxes, **kwargs)
+
+    fig.suptitle(title)
+    ax1.grid()
+    ax2.grid()
+    ax1.legend()
+    #plt.show()
+    return fig
+    
+def broken_histograms_plot(histogram1, histogram2, y_break, title,label_h1,label_h2):
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    fig.subplots_adjust(hspace=0.1)  # adjust space between Axes
+
+    #plot data on same axis
+    ax1.bar(range(len(histogram1)),histogram1,label=label_h1)# align='edge',width=-0.8
+    ax1.bar(range(len(histogram2)),histogram2,label=label_h2,alpha = 0.8)
+    ax2.bar(range(len(histogram1)),histogram1)
+    ax2.bar(range(len(histogram2)),histogram2,alpha = 0.8)
+
+    #zoom in ax2
+    ax2.set_ylim(0,y_break)
+    #adjust ax1
+    ax1.set_ylim(y_break)
+
+    # hide the spines between ax and ax2
+    ax1.spines.bottom.set_visible(False)
+    ax2.spines.top.set_visible(False)
+    ax1.xaxis.tick_top()
+    ax1.tick_params(labeltop=False)  # don't put tick labels at the top
+    ax2.xaxis.tick_bottom()
+
+    d = .5  # proportion of vertical to horizontal extent of the slanted line
+    kwargs = dict(marker=[(-1, -d), (1, d)], markersize=12,
+                linestyle="none", color='k', mec='k', mew=1, clip_on=False)
+    ax1.plot([0, 1], [0, 0], transform=ax1.transAxes, **kwargs)
+    ax2.plot([0, 1], [1, 1], transform=ax2.transAxes, **kwargs)
+
+    fig.suptitle(title)
+    ax1.grid()
+    ax2.grid()
+    ax1.legend()
+    #plt.show()
+    return fig
+    
 # def detect_onsets(track, sampling_rate, with_backtrack):
 #     if sampling_rate<44100 : raise ValueError("The sampling rate for essentia onset detect is otpimized for 44.1kHz. For lower rates use librosa.")
     

@@ -94,7 +94,7 @@ class Seq2SeqTrainer(nn.Module):
                         "learnable_codebook" : self.model.encoder.quantizer.learnable_codebook,
                         "chunk_size" : self.chunk_size,
                         "tracks_size" : self.track_size,
-                        "max_len":self.model.pe.pe.size(0),
+                        "max_len":self.model.pe.size,
                         "encoder_head":self.model.encoder.head_module,
                         "condense_type":self.model.encoder.condense_type,
                         "use_special_tokens":self.model.use_special_tokens,
@@ -157,38 +157,53 @@ class Seq2SeqTrainer(nn.Module):
         model = self.model.module if isinstance(self.model, DDP) else self.model
         
         if type(model)==Seq2SeqCoupling:
-            src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices = inputs.values()
+            src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices, scheduled_prob = inputs.values()
             #compute output
-            logits, tgt, tgt_idx, codebook_loss = self.model(src, tgt, src_pad_mask, tgt_pad_mask,
+            logits, tgt, tgt_idx, codebook_loss = self.model.forward(src, tgt, src_pad_mask, tgt_pad_mask,
                                                         sample_codebook_temp=self.codebook_sample_temperature,
-                                                        mask_time_indices = src_mask_indices)
+                                                        mask_time_indices = src_mask_indices,
+                                                        scheduled_sampling_prob=scheduled_prob)
             
         elif type(model)==Seq2SeqBase: #for autocompletion
-            src, src_pad_mask, src_mask_indices, label = inputs.values() 
+            src, src_pad_mask, src_mask_indices, label, scheduled_prob = inputs.values() 
             #compute output
-            logits, tgt, tgt_idx, codebook_loss = self.model(src, src_pad_mask, 
+            logits, tgt, tgt_idx, codebook_loss = self.model.forward(src, src_pad_mask, 
                                                              sample_codebook_temp=self.codebook_sample_temperature,
-                                                             mask_time_indices = src_mask_indices)
+                                                             mask_time_indices = src_mask_indices,
+                                                             )
             
         return logits,tgt,tgt_idx,codebook_loss
 
     @torch.no_grad    
-    def evaluate(self,eval_fetcher):
+    def evaluate(self,eval_fetcher, reg_alpha, scheduled_prob):
         prYellow("Evaluation...")
         loss=0
+        loss_ce=0
+        loss_entropy=0
+        loss_commit=0
         acc=0
         cb_usage=0
+        cb_usage_gt=0
         self.model.eval()
         for _ in range(len(eval_fetcher)):
             inputs = next(eval_fetcher)
+            inputs['scheduled_prob']=scheduled_prob
             
             logits,tgt,tgt_idx,codebook_loss = self._forward(inputs)
             
             tgt_out = tgt_idx[:,1:] #ground truth
             
-            loss_ce=self.criterion(logits.reshape(-1,logits.size(-1)), tgt_out.reshape(-1)).item() #reshqaped as (B*T,vocab_size) and (B*T,)
+            loss_, separate_losses = self._compute_loss(logits, tgt_out, reg_alpha, codebook_loss)
+            loss_ce_ , loss_entropy_, loss_commit_ = separate_losses
             
-            loss += loss_ce + self.codebook_loss_alpha*codebook_loss
+            loss+=loss_
+            loss_ce+=loss_ce_
+            loss_entropy+=loss_entropy_
+            loss_commit+=loss_commit_
+            
+            #loss_ce=self.criterion(logits.reshape(-1,logits.size(-1)), tgt_out.reshape(-1)).item() #reshqaped as (B*T,vocab_size) and (B*T,)
+            
+            #loss += loss_ce + self.codebook_loss_alpha*codebook_loss
             
             #topK search
             preds = predict_topK_P(self.k,logits,tgt_out)
@@ -196,15 +211,22 @@ class Seq2SeqTrainer(nn.Module):
             acc += compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=self.model.special_tokens_idx["pad"])
             
             cb_usage += compute_codebook_usage(preds,self.model.vocab_size,pad_idx=self.model.special_tokens_idx["pad"])
+            cb_usage_gt += compute_codebook_usage(tgt_out.reshape(-1),self.model.vocab_size,pad_idx=self.model.special_tokens_idx["pad"])
         
         loss=loss/len(eval_fetcher)
+        loss_ce=loss_ce/len(eval_fetcher)
+        loss_entropy=loss_entropy/len(eval_fetcher)
+        loss_commit=loss_commit/len(eval_fetcher)
+        separate_losses = (loss_ce, loss_entropy, loss_commit)
         acc/=len(eval_fetcher)
         cb_usage/=len(eval_fetcher)
+        cb_usage_gt/=len(eval_fetcher)
         print("Codebook usage:",cb_usage)
+        print("Codebook usage GT:",cb_usage_gt)
         
-        return loss, acc, cb_usage
+        return loss, acc, cb_usage, separate_losses
     
-    def plot_loss(self, epoch, train_losses, val_losses, train_acc, val_acc):
+    def plot_loss(self, epoch, train_losses, val_losses, train_acc, val_acc,name):
         fig, ax1 = plt.subplots(figsize=(10,10),dpi=150)
         ax2=ax1.twinx()
         epochs = range(1,epoch+2)
@@ -224,10 +246,34 @@ class Seq2SeqTrainer(nn.Module):
         ax1.set_ylabel("Cross Entropy")
         ax2.set_ylabel("Accuracy")
         ax2.grid()
-        fig.savefig(f"runs/coupling/Loss_{self.trainer_name}.png")
-        fig.tight_layout()
-        fig.show()
-    
+        fig.savefig(f"runs/coupling/{name}_{self.trainer_name}.png")
+        #fig.tight_layout()
+        #fig.show()
+        #plt.close()
+        
+    def plot_loss_separate(self, epoch, train_losses_ce, train_losses_entropy, val_losses_ce, val_losses_entropy, train_acc, val_acc):
+        fig, ax1 = plt.subplots(figsize=(10,10),dpi=150)
+        ax2=ax1.twinx()
+        epochs = range(1,epoch+2)
+        #plt.figure(figsize=(10,10),dpi=150)
+        ax1.plot(epochs,train_losses_ce,label="train loss ce", color="tab:blue")
+        ax1.plot(epochs,train_losses_entropy,label="train loss entropy")
+        ax2.plot(epochs,train_acc,"--",label="train accuracy",color="tab:green")
+        if len(val_losses_ce) != 0:
+            ax1.plot(epochs,val_losses_ce,label="val loss ce", color="tab:orange")
+            ax1.plot(epochs,val_losses_entropy,label="val loss entropy")
+            ax2.plot(epochs, val_acc, "--",label="val accuracy", color="tab:red")
+        
+        lines, labels = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax2.legend(lines + lines2, labels + labels2, loc=0)
+
+        
+        ax1.set_xlabel("Epochs")
+        ax1.set_ylabel("Cross Entropy / Entropy")
+        ax2.set_ylabel("Accuracy")
+        ax2.grid()
+        fig.savefig(f"runs/coupling/Loss_{self.trainer_name}_separate.png")
     
     #TODO : ADD reg_alpha to class attributes ?
     def _compute_loss(self,logits,tgt_out,reg_alpha,codebook_loss) -> torch.Tensor :
@@ -251,19 +297,20 @@ class Seq2SeqTrainer(nn.Module):
         #add codebook diversity loss ?
         
         #entropy regularization --> maximize entropy = use most of vocabulary
-        # probs = F.softmax(logits,dim=-1)
-        # entropy = -1.*(torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean())
-        # loss_entropy = reg_alpha*entropy
-        loss_entropy=0
+        probs = F.softmax(logits,dim=-1)
+        entropy = -1.*(torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean())
+        loss_entropy = reg_alpha*entropy
+        #loss_entropy=0
         
-        #totasl loss = crossentropy + codebook loss + (-entropy)
+        #totasl loss = crossentropy + codebook loss + (-entropy). - entropy because we want to maximize and loss decreases when entropy rises
         loss = (loss_ce + loss_commit - loss_entropy)/self.grad_accum_steps 
         
-        return loss
+        return loss, (loss_ce, loss_entropy, loss_commit)
     
-    def _run_batch(self,train_fetcher,reg_alpha,step,trial):    
+    def _run_batch(self,train_fetcher,reg_alpha,step,trial,scheduled_prob):    
         
         inputs = next(train_fetcher)
+        inputs['scheduled_prob']=scheduled_prob
        
         logits,tgt,tgt_idx,codebook_loss = self._forward(inputs)
                 
@@ -272,7 +319,7 @@ class Seq2SeqTrainer(nn.Module):
         
         tgt_out = tgt_idx[:,1:] #ground truth outputs are the token indexes shifted to the right
         
-        loss = self._compute_loss(logits, tgt_out, reg_alpha, codebook_loss)
+        loss, separate_losses = self._compute_loss(logits, tgt_out, reg_alpha, codebook_loss)
         
         preds = predict_topK_P(self.k,logits,tgt_out) 
         
@@ -280,7 +327,7 @@ class Seq2SeqTrainer(nn.Module):
         
         preds = preds.reshape(logits.shape[:-1]) #reshape to B,chunks
         
-        if step%20==0 and trial==None:
+        if step%5==0 and trial==None:
             if self.gpu_id==0:
                 prYellow(f"Pred {preds[0].numpy(force=True)}")
                 prYellow(f"GT {tgt_out[0].numpy(force=True)}")
@@ -289,17 +336,18 @@ class Seq2SeqTrainer(nn.Module):
                 prYellow(f"Pred {preds[2].numpy(force=True)}")
                 prYellow(f"GT {tgt_out[2].numpy(force=True)}")
                 prRed(f"Pred {torch.argmax(logits[2],-1).numpy(force=True)}")
+                prRed(f"{torch.topk(logits.softmax(-1)[2,:5],k=5)}") #show topk probs of 10 first tokens
                 prYellow(loss.item())
                 
                 
-                #prGreen(f"Probs {torch.sort(probs[0][:10],dim=-1,descending=True)[0][:,:5].numpy(force=True)}") #show the 5 highest probabilities for 10 first tokens
+        
         params = self.model.parameters() if not isinstance(self.model,DDP) else self.model.module.parameters()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(params,1.0)
         if step%self.grad_accum_steps == 0 or step == len(train_fetcher):
             for optim in self.optimizer : optim.step()
         
-        return loss, acc
+        return loss, acc, separate_losses
                 
     def train(self, train_fetcher, val_fetcher,epochs, evaluate=True,reg_alpha=0.1, trial : optuna.trial.Trial = None):
         if evaluate :
@@ -308,7 +356,11 @@ class Seq2SeqTrainer(nn.Module):
         train_iter=epochs*len(train_fetcher) #total iterations
         
         train_losses=[]
+        train_losses_ce = []
+        train_losses_entropy = []
         val_losses=[]
+        val_losses_ce = []
+        val_losses_entropy = []
         train_accs = []
         val_accs=[]
         epoch_0=self.resume_epoch
@@ -338,6 +390,9 @@ class Seq2SeqTrainer(nn.Module):
         
         for epoch in range(self.resume_epoch,epochs):
             train_loss=0
+            train_loss_ce=0
+            train_loss_entropy=0
+            train_loss_commit=0
             train_acc=0
             val_loss=0
             self.model.train()
@@ -348,6 +403,10 @@ class Seq2SeqTrainer(nn.Module):
             except:
                 pass
             
+            #shceduled sampling probability
+            scheduled_prob = 1 - np.exp(-epoch/(0.1*epochs)) #exponential decay
+            print("schdeduled sampling prob =",scheduled_prob)
+            
             for step in range(len(train_fetcher)):
                 if self.gpu_id==0:
                     progress_bar.update(1) #update progress bar
@@ -356,9 +415,13 @@ class Seq2SeqTrainer(nn.Module):
                 #get inputs and targets
                 #inputs = next(train_fetcher)
                 
-                loss, acc = self._run_batch(train_fetcher,reg_alpha,step,trial)
+                loss, acc, separate_losses = self._run_batch(train_fetcher,reg_alpha,step,trial,scheduled_prob)
+                loss_ce, loss_entropy, loss_commit = separate_losses
                 
                 train_loss+=loss.item()
+                train_loss_ce+=loss_ce.item()
+                train_loss_entropy+=loss_entropy.item()
+                train_loss_commit+=loss_commit.item()
                 
                 train_acc+=acc
                 
@@ -369,13 +432,21 @@ class Seq2SeqTrainer(nn.Module):
                 
                 
             train_loss = train_loss/len(train_fetcher)
+            train_loss_ce = train_loss_ce/len(train_fetcher)
+            train_loss_commit = train_loss_commit/len(train_fetcher)
+            train_loss_entropy = train_loss_entropy/len(train_fetcher)
+            
             train_losses.append(train_loss)
+            train_losses_ce.append(train_loss_ce)
+            train_losses_entropy.append(train_loss_entropy)
+            
             train_acc/=len(train_fetcher)
+            train_accs.append(train_acc)
             
             prGreen(f"Training loss at epoch {epoch+1}/{epochs} : {train_loss}. Accuracy = {train_acc}")
             #val loss
             if evaluate:
-                val_loss, val_acc, codebook_usage = self.evaluate(val_fetcher)
+                val_loss, val_acc, codebook_usage, separate_losses_val = self.evaluate(val_fetcher, reg_alpha, scheduled_prob)
                 val_loss = val_loss.item()
                 prGreen(f"Validation loss at epoch {epoch+1}/{epochs} : {val_loss}. Accuracy = {val_acc}")
             
@@ -383,16 +454,21 @@ class Seq2SeqTrainer(nn.Module):
                 val_loss = train_loss #for checkpooint saving
                 val_acc = train_acc
                 codebook_usage=best_codebook_usage
+                separate_losses_val = separate_losses
             
+            loss_ce_val, loss_entropy_val, loss_commit_val = separate_losses_val
             
             val_losses.append(val_loss) 
-            
-            train_accs.append(train_acc)
+            val_losses_ce.append(loss_ce_val.item())
+            val_losses_entropy.append(loss_entropy_val.item())
             val_accs.append(val_acc)   
             
             if epoch>0 and trial==None:   
                 if self.gpu_id==0:
-                    self.plot_loss(epoch,train_losses, val_losses, train_accs, val_accs)
+                    self.plot_loss(epoch,train_losses, val_losses, train_accs, val_accs, "total_loss")
+                    self.plot_loss(epoch,train_losses_ce, val_losses_ce, train_accs, val_accs, "crossentropy_loss")
+                    self.plot_loss(epoch,train_losses_entropy, val_losses_entropy, train_accs, val_accs, "entropy_loss")
+                    #self.plot_loss_separate(epoch,train_losses_ce,train_losses_entropy, val_losses_ce, val_losses_entropy, train_accs, val_accs)
                     
             if val_acc>best_acc:#val_loss<best_loss:
                 best_loss=val_loss

@@ -231,7 +231,7 @@ def parse_args():
         
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', choices=['all','model', 'symbolic_generation','quality','apa','similarity','none'],nargs="*")
+    parser.add_argument('--task', choices=['all','model', 'symbolic_generation','quality','apa','similarity', 'consecutive_idxs','none'],nargs="*")
     parser.add_argument('--model_ckp',nargs='*',type = Path)
     parser.add_argument("--model_ckps_folder",type=Path,default=None)
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
@@ -490,12 +490,12 @@ def main():
             
             if tgt_folder == None:
                 #get mix folder 
-                tgt_folder = save_dir.joinpath("mix") #os.path.join(save_dir,"mix")
+                tgt_folder = save_dir.joinpath("mix")
             
             #for baseline (higher bound)
             if tgt_folder.name == "original":
-                tgt_folder = save_dir.joinpath("original") #os.path.join(save_dir,"original")
-            
+                tgt_folder = save_dir.joinpath("original") 
+                
             
             if not tgt_folder.exists():
                 raise RuntimeError("Wrong or no corresponding folder for APA measure. Please generate audio with '--generate'")
@@ -586,7 +586,7 @@ def main():
                 idxs = np.loadtxt(f, dtype=int)
                 lengths = compute_consecutive_lengths(idxs)
                 all_lengths.extend(lengths)
-                max_lengths.extend(max(lengths))
+                max_lengths.append(max(lengths))
                 gt_lengths.append(len(idxs))
             
             #compute statistics

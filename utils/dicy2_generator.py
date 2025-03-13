@@ -3,7 +3,7 @@
 from architecture.Model import load_model_checkpoint
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from utils.utils import lock_gpu, prGreen, prRed, prYellow, detect_onsets, find_non_empty, compute_consecutive_lengths
-from .metrics import compute_accuracy
+from .metrics import compute_accuracy as compute_acc
 import torch
 import numpy as np
 import sys, typing, os
@@ -69,11 +69,13 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     for i in range(len(memory_fetcher)):
         memory_data = next(memory_fetcher) #contains chunks and other data for model
         #encode memory -> extract labels for each slice/chunk
-        memory_idx = model.encoder.forward(memory_data.src, padding_mask = memory_data.src_padding_masks[0])[1] #(B,S)
+        #memory_idx = model.encoder.forward(memory_data.src, padding_mask = memory_data.src_padding_masks[0])[1] #(B,S)
+        memory_idx, memory_idx_special_tokens = model.encode(memory_data.src,memory_data.src_padding_masks,both=True)[1] #memory_idx with and without special tokens <sos> <eos> <pad> (B,S)
         
         #corpus = memory as [(label, content)] where label is codebook index from encoding and content is the slice index
         
         #TODO : OPTIMIZE THIS CODE PART
+        #iterate over batch elements
         for j,(idxs, slices) in enumerate(zip(memory_idx,memory_data.slices)):
             first = (i==0 and j==0) #first segment
             
@@ -99,7 +101,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
             native_chunk_idx+=1
         
         print(memory_idx.shape, memory_idx)
-        labels.append(memory_idx.numpy(force=True))
+        labels.extend(memory_idx_special_tokens.reshape(-1).numpy(force=True))
     
     memory_chunks = all_memory_chunks #rename for simplicity
     #memory = np.concatenate(memory_chunks)
@@ -137,10 +139,17 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
     
     queries = [] #slice indexes
     searches_for = [] #classes
+    preds = []
     
-    accuracy = []
+    # accuracy = []
     
     sliding = src_ds.pre_segmentation_strategy =='sliding'
+    
+    #compute set of labels in memory for force coupling
+    gt_set = None
+    if force_coupling:
+        gt_set = torch.tensor(list(set(tgt_gts)), device=model.device) #flatten list of gts in memory
+        print("GT SET :", gt_set)
     
     if sliding:
         output_hop_size = src_ds.hop_size/src_ds.max_duration #the equivalent hop size in chunks
@@ -161,12 +170,13 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         
         if with_coupling: #if we want to generate a more complex response 
             
-            if tgt_gts != None :
-                tgt_gt = torch.tensor(tgt_gts[i],device = model.device) #(B,T)
-                tgt_gt = torch.cat([torch.tensor([sos],device=model.device).expand(tgt_gt.size(0),1),
-                                    tgt_gt,
-                                    torch.tensor([eos],device=model.device).expand(tgt_gt.size(0),1)],dim=1)
-            else : tgt_gt = None
+            # if tgt_gts != None :
+            #     tgt_gt = torch.tensor(tgt_gts[i],device = model.device) #(B,T)
+            #     tgt_gt = torch.cat([torch.tensor([sos],device=model.device).expand(tgt_gt.size(0),1),
+            #                         tgt_gt,
+            #                         torch.tensor([eos],device=model.device).expand(tgt_gt.size(0),1)],dim=1)
+                
+            # else : tgt_gt = None
             
             #TODO : ADD ARGUMENT TO USE LAST PREDICTION AS BEGINNING OF TGT ?
             tgt_idx = model.coupling(encoded_src, 
@@ -175,7 +185,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
                                        max_len=len(encoded_src[0]),
                                        decoding_type=decoding_type,
                                        temperature=temperature,
-                                       tgt_gt=tgt_gt if force_coupling else None, #here we do a distinction for compute accuracy and force coupling
+                                       gt_set=gt_set, #already None if not force coupling
                                        entropy_weight=entropy_weight)[1] #(B,T)
             
             #print("pred :",tgt_idx)
@@ -183,15 +193,19 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
         
-        #compute accuracy of predicted sequence
-        acc = -1
-        if tgt_gt!=None:
-            acc = compute_accuracy(tgt_idx.reshape(-1),tgt_gt.reshape(-1),pad_idx=model.special_tokens_idx['pad'])
-        accuracy.append(acc)
+        # #compute accuracy of predicted sequence
+        # acc = -1
+        # if tgt_gt!=None:
+        #     acc = compute_accuracy(tgt_idx.reshape(-1),tgt_gt.reshape(-1),pad_idx=model.special_tokens_idx['pad'])
+        # accuracy.append(acc)
+        
+        #append predictions for later accuracy calculation
+        preds.extend(tgt_idx.reshape(-1).numpy(force=True))
         
         print(tgt_idx)
         
         tgt_idx = tgt_idx[:,1:-1] #remove special_tokens (sos and theoric eos)
+        
         
         for j,idxs in enumerate(tgt_idx):
             print("chunk indexes (batch, track segment) :",i,j)
@@ -259,11 +273,11 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             
             queries.extend(slices)
     
-    accuracy = np.mean(accuracy)
+    # accuracy = np.mean(accuracy)
     
     print("response len (in chunks)",len(queries))
     
-    return queries, searches_for, accuracy
+    return queries, searches_for, preds
 
 def index_to_timestamp(index : int, chunks:np.ndarray):
     if index == -1: 
@@ -409,7 +423,7 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
     
     prYellow("Generating reponse...")
     tgt_gts = labels if (force_coupling or compute_accuracy) else None
-    queries, searches_for, accuracy = generate_response(src_ds, model, chunk_segmentation, 
+    queries, searches_for, preds = generate_response(src_ds, model, chunk_segmentation, 
                                                         with_coupling, k, decoding_type, generator, temperature, entropy_weight,
                                                         batch_size, force_coupling, tgt_gts)
     source = src_ds.native_track
@@ -456,7 +470,10 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
     
     counts = np.bincount(search_for,minlength=model.codebook_size)
     probs = counts/sum(counts)
-    entropy = -sum([p*np.log2(p+1e-9) for p in probs]) #in bits
+    entropy = -sum([p*np.log2(p+1e-9) for p in probs]) #in bits¨
+    accuracy = -1
+    if compute_accuracy :
+        accuracy = compute_acc(np.array(preds), np.array(labels), model.special_tokens_idx['pad'].item())
     
     pad = len(response)-len(source)
     if pad > 0 : #response > source

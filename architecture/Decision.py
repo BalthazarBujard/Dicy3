@@ -33,7 +33,7 @@ class Decision(nn.Module):
     
     def forward(self, src : torch.Tensor, tgt : torch.Tensor, 
                 src_mask : torch.Tensor = None, tgt_mask : torch.Tensor = None, 
-                src_pad_mask : torch.Tensor = None, tgt_pad_mask : torch.Tensor = None):
+                src_pad_mask : torch.Tensor = None, tgt_pad_mask : torch.Tensor = None) -> torch.Tensor:
         
         if self.decoder_only:
             memory = src

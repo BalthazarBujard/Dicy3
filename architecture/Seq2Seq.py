@@ -40,6 +40,7 @@ class PositionalEncoding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
+        self.size=max_len
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         """
@@ -50,6 +51,28 @@ class PositionalEncoding(nn.Module):
         x = self.dropout(x)
         return x
     
+class EmbeddingPositionalEncoding(nn.Module):
+    def __init__(self, embed_dim: int, max_len: int = 300, dropout: float = 0.1):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Create an embedding layer for positions
+        self.pe = nn.Embedding(max_len, embed_dim)  # (max_len, embed_dim)
+        self.size=max_len
+        
+
+        # Initialize embeddings (optional, can be left random)
+        nn.init.normal_(self.pe.weight, mean=0, std=0.02)  # Like transformer embeddings
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Arguments:
+            x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
+        """
+        seq_len = x.size(1)
+        positions = torch.arange(seq_len, device=x.device).unsqueeze(0)  # (1, seq_len)
+        x = x + self.pe(positions)  # Add learned positional embeddings
+        return self.dropout(x)
     
 
 #TODO : IMPLEMENT generate() METHOD FOR FUTURE USE OF SEQUENCE CONTINUATION PREDICTION
@@ -70,7 +93,7 @@ class Seq2SeqBase(nn.Module):
         self.pe = PositionalEncoding(self.dim,max_len=max_len)
         
         #transformer bloc for seq2seq modeling
-        self.decision=decisionModule#nn.Transformer(self.dim,num_encoder_layers=transformer_layers,num_decoder_layers=transformer_layers, batch_first=True) 
+        self.decision=decisionModule #nn.Transformer(self.dim,num_encoder_layers=transformer_layers,num_decoder_layers=transformer_layers, batch_first=True) 
         
         self.max_len=max_len
         self.codebook_size = localEncoder.quantizer.codebook_size #CAREFUL IF MULTIPLE CODEBOOKS !!!
@@ -248,17 +271,21 @@ class Seq2SeqBase(nn.Module):
         return embeddings
     
     def _greedy_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, k:Union[int,float], max_len : Optional[int],
-                         tgt_gt : torch.Tensor = None, temperature : float = 1.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:    
+                         gt_set : torch.Tensor = None, temperature : float = 1.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:    
             
         B = memory.size(0)
         
-        if tgt_gt != None: 
-            if tgt_gt.ndim < 2 : #1D tensor
-                print("Expanding tgt_gt dim to match batch size")
-                #expand batch dimension
-                tgt_gt = tgt_gt.view(1,-1).repeat(B,1)
+        # if tgt_gt != None: 
+        #     if tgt_gt.ndim < 2 : #1D tensor
+        #         print("Expanding tgt_gt dim to match batch size")
+        #         #expand batch dimension
+        #         tgt_gt = tgt_gt.view(1,-1).repeat(B,1)
             
-            assert tgt_gt.shape[1]>=max_len, "If tgt_out is specified, it should be at least as long as max_len" 
+        #     assert tgt_gt.shape[1]>=max_len, "If tgt_out is specified, it should be at least as long as max_len" 
+        
+        if gt_set != None:
+            if gt_set.ndim < 2 : #1D tensor
+                gt_set = gt_set.view(1,-1).repeat(B,1) # (B, set size)
         
         
         #init tgt as SOS
@@ -295,9 +322,9 @@ class Seq2SeqBase(nn.Module):
             #append new probs
             probs = torch.cat([probs,logits.softmax(-1)],dim=1)
             
-            tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None #(B,1)
+            #tgt_token = tgt_gt[:,tgt.size(1)].unsqueeze(1) if tgt_gt != None else None #(B,1) #old force_coupling
             #top-K prediction
-            next_token_idx = predict_topK_P(k,logits,tgt_token).reshape(logits.shape[:-1])[:,-1]  #(B,)
+            next_token_idx = predict_topK_P(k,logits, gt_set, from_set = gt_set != None).reshape(logits.shape[:-1])[:,-1]  #(B,)
 
             #next_token : (B,D)
             next_token = self.from_indexes_to_embeddings(next_token_idx)
@@ -322,23 +349,49 @@ class Seq2SeqBase(nn.Module):
         
         return tgt, tgt_idx, probs
     
+    def apply_repetition_penalty(self, probs: torch.Tensor, states: torch.Tensor, penalty: float) -> torch.Tensor:
+        """
+        Reduces probability of already generated tokens to discourage repetition.
+        
+        Args:
+            probs (torch.Tensor): Shape (B, beam_width, vocab_size), probabilities from softmax.
+            states (torch.Tensor): Shape (B * beam_width, T), previously generated sequences.
+            penalty (float): Repetition penalty factor (e.g., 1.2 means reducing repeated tokens).
+        
+        Returns:
+            torch.Tensor: Adjusted probabilities with repetition penalty.
+        """
+        B, beam_width, vocab_size = probs.shape
+
+        # Convert to shape (B * beam_width, vocab_size)
+        probs = probs.view(B * beam_width, vocab_size)
+
+        for i in range(B * beam_width):
+            for token in set(states[i].tolist()):  # Unique tokens in the sequence
+                print(f"before penalty on token {token}",probs[i, token])
+                probs[i, token] /= penalty  # Reduce probability of repeated tokens
+                print(f"after penalty on token {token}",probs[i, token])
+
+        return probs.view(B, beam_width, vocab_size)  # Restore shape
+    
     # beam search transition function : computes the probabilities over the state space given an input sequence of states 
     def __beam_search_transition_fn(self, 
                                     candidates: List[List[Candidate]], 
                                     memory : torch.Tensor, 
                                     memory_mask : torch.Tensor,
-                                    temperature : float) -> torch.Tensor:
+                                    temperature : float,
+                                    repetition_penalty : float = 1.5) -> torch.Tensor:
         
         B,T_src,dim=memory.shape
         beam_width = len(candidates[0])
         
         
-        #get sequence of states from eahc candidate
+        #get sequence of states from each candidate
         states = torch.tensor(
             [[candidate.states for candidate in candidates_batch] for candidates_batch in candidates],
                               device=self.device
                               ) #(B, beam_width,T)
-        
+        #print(states)
         #expand memory to match states shape
         memory = memory.unsqueeze(1).repeat(1,beam_width,1,1) #(B, beam_width, T_src,dim)
         memory_mask = memory_mask.unsqueeze(1).repeat(1,beam_width,1) #(B,beam_width,T_src)
@@ -369,6 +422,9 @@ class Seq2SeqBase(nn.Module):
         logits = logits/temperature
         #only take last step for each elem in batch and beam
         probs = torch.softmax(logits,dim=-1)[:,:,-1,:] #(B,beam_width,vocab_size)
+        
+        #apply repetition penalty
+        probs = self.apply_repetition_penalty(probs, states, repetition_penalty)
         
         #print(probs.shape)
         #print(probs)
@@ -418,10 +474,10 @@ class Seq2SeqBase(nn.Module):
     
     def decode(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor,
                k:int, max_len : int, decoding_type : str, temperature : float = 1,
-               tgt_gt : torch.Tensor = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+               gt_set : torch.Tensor = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         if decoding_type == "greedy":
-            tgt_out, tgt_idx, probs = self._greedy_decoding(memory, memory_pad_mask, k, max_len, tgt_gt, temperature)
+            tgt_out, tgt_idx, probs = self._greedy_decoding(memory, memory_pad_mask, k, max_len, gt_set, temperature)
             
         elif decoding_type == "beam":
             tgt_out, tgt_idx, probs = self._beam_search_decoding(memory, memory_pad_mask, k, max_len, temperature, entropy_weight)
@@ -432,18 +488,60 @@ class Seq2SeqBase(nn.Module):
     
     #encode input sequence --> assign labels (codebook index,..)
     @torch.no_grad
-    def encode(self, src : torch.Tensor, src_pad_masks : List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: #needs both pad masks
+    def encode(self, src : torch.Tensor, src_pad_masks : List[torch.Tensor], both :bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: #needs both pad masks
         z_src, src_idx, codebook_loss = self.encoder.forward(src, padding_mask = src_pad_masks[0])        
         
-        if self.use_special_tokens:
-            z_src, src_idx, src_pad_mask = self._apply_special_tokens(z_src,src_idx, src_pad_masks[1])
+        if self.use_special_tokens or both:
+            z_src_, src_idx_, src_pad_mask_ = self._apply_special_tokens(z_src,src_idx, src_pad_masks[1])
         
         else : 
             #if not apply special tokens then src_pad_mask stays the same
-            src_pad_mask = src_pad_masks[1]
+            src_pad_mask_ = src_pad_masks[1]
+            z_src_ = z_src
+            src_idx_ = src_idx
         
-        return z_src, src_idx, src_pad_mask
+        if both :
+            return (z_src, z_src_), (src_idx, src_idx_), (src_pad_mask_,src_pad_mask_)
+                                                                 
+        else :
+            return z_src_, src_idx_, src_pad_mask_
+    
+    def scheduled_sampling_forward(self, src : torch.Tensor, tgt : torch.Tensor, 
+                src_mask : torch.Tensor, tgt_mask : torch.Tensor, src_pad_mask : torch.Tensor, tgt_pad_mask : torch.Tensor,
+                scheduled_prob : float
+                ):
+        """
+        tgt: (B, T) -> Ground truth target tokens
+        memory: (B, T_src, dim) -> Encoder output
+        memory_mask: (B, T_src) -> Mask for encoder memory
+        scheduled_prob: float -> Probability of using model-generated token instead of ground truth
+        """
+        B, T, dim = tgt.shape
+
+        with torch.no_grad():
+            # Generate logits for the entire sequence (SINGLE FORWARD PASS)
+            logits = self.decision.forward(src,tgt,src_mask,tgt_mask,src_pad_mask, tgt_pad_mask)  # (B, T, vocab_size)
+            # Get model predictions (argmax over vocabulary)
+            pred_tokens = logits.argmax(dim=-1)  # (B, T)
         
+        sampled_tgt = tgt.clone()  # Start with ground truth
+
+        # Create a mask deciding where to use model predictions
+        mask = (torch.rand(B, T, device=tgt.device) < scheduled_prob)  # True = use model output
+
+        # Avoid modifying <SOS> token (assume first token is always ground truth)
+        mask[:, 0] = False  # Ensure first token remains teacher-forced
+        
+        #print("schedeled sampling mask:",mask)
+        
+        #Shift pred_tokens to be correctly aligned with sampled_tgt
+        pred_tokens = torch.cat([torch.full((B,1),self.special_tokens_idx['sos'],device=tgt.device), pred_tokens[:, :-1]], dim=1)
+
+        # Replace tokens with model predictions where mask is True
+        sampled_tgt[mask] = self.from_indexes_to_embeddings(pred_tokens[mask])
+        
+
+        return sampled_tgt
     
     
     
@@ -468,10 +566,13 @@ class Seq2SeqCoupling(Seq2SeqBase):
         src_mask = torch.repeat_interleave(src_mask,repeats = self.decision.heads,dim=0) #(B*heads,T,S)
         
         return x, src_mask
-       
+    
+    #TODO : utiliser self.encode plutot que manuellement appeler encoder et apply special tokens
     def forward(self, src : torch.Tensor, tgt : torch.TensorType, 
                 src_pad_masks : List[torch.Tensor], tgt_pad_masks : List[torch.Tensor], 
-                sample_codebook_temp : Optional[float] = None, mask_time_indices : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
+                sample_codebook_temp : Optional[float] = None, 
+                mask_time_indices : Optional[torch.Tensor] = None,
+                scheduled_sampling_prob : Optional[float] = None ) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
          
         #sample dim padding masks
         src_pad_mask=src_pad_masks[0]
@@ -498,7 +599,8 @@ class Seq2SeqCoupling(Seq2SeqBase):
         #detach targets -> avoid gradient flowing from answers
         z_tgt = z_tgt.detach()
         tgt_idx = tgt_idx.detach()
-            
+        
+        #rename to src and tgt
         src = z_src
         tgt = z_tgt
         
@@ -508,19 +610,26 @@ class Seq2SeqCoupling(Seq2SeqBase):
                 
         src_mask, tgt_mask = self._create_masks(src, tgt_input)
         
+        #apply scheduled sampling here
+        if scheduled_sampling_prob != None:
+            tgt_input = self.scheduled_sampling_forward(src, tgt_input, src_mask, tgt_mask, src_pad_mask, tgt_pad_mask, scheduled_sampling_prob)
+        
+        
         #apply source masking
         if self.has_masking:
             src, src_mask = self._apply_masking(src, mask_time_indices, tgt_input)
+            
             
         out = self.decision(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) #already logits over vocab_size
         
         return out, tgt, tgt_idx, codebook_loss #return predictions and encoded target sequence for loss computing
     
+    
     #generate sequence of labels to "couple" the input sequence of labels (memory)
     @torch.no_grad
     def coupling(self, encoded_src : torch.Tensor, src_pad_mask : torch.Tensor, #and this pad mask is on chunks dim (after process from encode)
                  k:int, max_len : int, decoding_type : str, temperature : float, 
-                 tgt_gt : Optional[torch.Tensor] = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: 
+                 gt_set : Optional[torch.Tensor] = None, entropy_weight : Optional[float] = 0.) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: 
         
         src = encoded_src
         
@@ -529,20 +638,20 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         memory = self.decision.encode(src,src_mask=None,src_pad_mask=src_pad_mask) #encode src once -> pass through Transformer encoder if enc-dec else will be = src
         
-        tgt, tgt_idx, probs = self.decode(memory, src_pad_mask, k, max_len, decoding_type, temperature, tgt_gt, entropy_weight)
+        tgt, tgt_idx, probs = self.decode(memory, src_pad_mask, k, max_len, decoding_type, temperature, gt_set, entropy_weight)
         
         return tgt, tgt_idx, probs
     
     @torch.no_grad 
     def generate(self,src : torch.Tensor ,src_pad_masks : List[torch.Tensor], 
                  k : int, decoding_type : str, max_len : Optional[int] = None, 
-                 temperature : float = 1, entropy_weight : float = 0, tgt_gt : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,torch.Tensor, torch.Tensor]:
+                 temperature : float = 1, entropy_weight : float = 0, gt_set : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,torch.Tensor, torch.Tensor]:
         
         encoded_src, src_idx, src_pad_mask = self.encode(src, src_pad_masks = src_pad_masks)  #encode audio sequence into sequence of labels / codevectors (and process chunks pad mask)
         
         if not max_len : max_len = encoded_src.size(1) #maximum generated sequence size is equal to size of input sequence
         
-        tgt, tgt_idx, probs = self.coupling(encoded_src, src_pad_mask, k, max_len, decoding_type, temperature, tgt_gt, entropy_weight) #generate sequence of expected labels for coupling
+        tgt, tgt_idx, probs = self.coupling(encoded_src, src_pad_mask, k, max_len, decoding_type, temperature, gt_set, entropy_weight) #generate sequence of expected labels for coupling
         
         return tgt, tgt_idx, probs #tgt probably not used but not bad idea    
         

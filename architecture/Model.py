@@ -22,7 +22,7 @@ class myDDP(DDP):
 #script to build different models and load checkpopints
 
 #TODO : NOW THE SEQ2SEQ BUILDER CAN TAKE **KWARGS FROM DICT
-def load_model_checkpoint(ckp_path:Path, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Tuple[Union[Seq2SeqBase,Seq2SeqCoupling], dict, dict] :
+def load_model_checkpoint(ckp_path:Path, data : str = None, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Tuple[Union[Seq2SeqBase,Seq2SeqCoupling], dict, dict] :
     
     ckp = torch.load(ckp_path, map_location=torch.device("cpu"))
     model_class = ckp["model_class"]
@@ -59,7 +59,9 @@ def load_model_checkpoint(ckp_path:Path, backbone_checkpoint="/data3/anasynth_no
     
     #if issubclass(model_class,Seq2SeqBase):
     model = SimpleSeq2SeqModel(backbone_checkpoint,bb_type,dim,vocab_size,max_len,encoder_head,use_special_tokens,chunking=chunking,
-                                   condense_type=condense_type,has_masking=has_masking,task=task,transformer_layers=transformer_layers,decoder_only=decoder_only,inner_dim=inner_dim,heads=heads,dropout=dropout)
+                                   condense_type=condense_type,has_masking=has_masking,task=task,
+                                   transformer_layers=transformer_layers,decoder_only=decoder_only,inner_dim=inner_dim,heads=heads,dropout=dropout,
+                                   chunk_size = model_params["chunk_size"], data = data)
     
     #else : raise ValueError(f"the model class from the checkpoint is invalid. Should be an instance (or subclass) of 'Seq2SeqBase' but got {model_class}")
     
@@ -86,10 +88,13 @@ def build_backbone(checkpoint : Path, type : str, mean : bool, pooling : bool, o
     
     return backbone
 
-def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, restart : bool)-> KmeansQuantizer:
+def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, restart : bool, chunk_size : float = None, data : str = None)-> KmeansQuantizer:
     #vector quantizer  
     assert vocab_size in [16,32,64,128,256,512,1024]
-    centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{dim}.npy",allow_pickle=True)
+    if data == None or chunk_size == None :
+        centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{dim}.npy",allow_pickle=True)
+    else :
+        centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{chunk_size}s_{data}.npy",allow_pickle=True)
     centers=torch.from_numpy(centers)
     vq = KmeansQuantizer(centers,learnable_codebook,dim,restart)
     
@@ -98,7 +103,7 @@ def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, rest
 
 def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone : bool, dim : int, 
                        vocab_size : int, learnable_codebook : bool, restart_codebook : bool,
-                       chunking : str, encoder_head : str, condense_type : str = None) -> LocalEncoder:
+                       chunking : str, encoder_head : str, condense_type : str = None, chunk_size : float = None, data : str = None) -> LocalEncoder:
     
     output_final_proj = dim==256 #if model dimension is 256 we want the final projection output, else 768 hidden layer output dim
     
@@ -120,7 +125,7 @@ def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone
        
     
     #vector quantizer  
-    vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook)
+    vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook, chunk_size, data)
     
     localEncoder=LocalEncoder(backbone,vq,encoder_head,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
     
@@ -157,6 +162,8 @@ def SimpleSeq2SeqModel(backbone_checkpoint : Path,
                        inner_dim : int = 2048,
                        heads : int = 12,
                        norm_first : bool = True,
+                       chunk_size : float = None,
+                       data : str = None,
                        kmeans_init : bool = False,
                        threshold_ema_dead_code : float = 0,
                        commit_weight : float = 1.,
@@ -167,7 +174,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint : Path,
     
     localEncoder=build_localEncoder(backbone_checkpoint,backbone_type, freeze_backbone, dim,
                                     vocab_size, learnable_codebook, restart_codebook, chunking,
-                                    encoder_head, condense_type)
+                                    encoder_head, condense_type,chunk_size, data)
         
     decision_module = build_decision(localEncoder.dim,transformer_layers,
                                      vocab_size=vocab_size+3*use_special_tokens, #+ pad, sos, eos
