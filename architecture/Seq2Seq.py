@@ -592,9 +592,10 @@ class Seq2SeqCoupling(Seq2SeqBase):
             z_tgt, tgt_idx, tgt_pad_mask = self._apply_special_tokens(z_tgt,tgt_idx, tgt_pad_mask)
             
         
-        #add position information
-        z_src = self.pe.forward(z_src)
-        z_tgt = self.pe.forward(z_tgt)
+        #add position information (if not trainable relative pos encoding)
+        if not self.decision.relative_pe:
+            z_src = self.pe.forward(z_src)
+            z_tgt = self.pe.forward(z_tgt)
         
         #detach targets -> avoid gradient flowing from answers
         z_tgt = z_tgt.detach()
@@ -620,7 +621,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
             src, src_mask = self._apply_masking(src, mask_time_indices, tgt_input)
             
             
-        out = self.decision(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) #already logits over vocab_size
+        out = self.decision.forward(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) #already logits over vocab_size
         
         return out, tgt, tgt_idx, codebook_loss #return predictions and encoded target sequence for loss computing
     

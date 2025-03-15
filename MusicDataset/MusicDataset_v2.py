@@ -808,8 +808,8 @@ class MusicCouplingDatasetv2(Dataset):
         
         #randomly select a subset of the other idx (cf Diff-A-Riff)
         if len(other_idx)>1:
-            size = np.random.randint(1,len(other_idx))
-            other_idx = np.random.choice(other_idx,size=size,replace=False)
+            #size = np.random.randint(1,len(other_idx))
+            other_idx = np.random.choice(other_idx,size=(1,),replace=False)
         
         stem_chunks = self.containers[container_idx][chunk_idx][0] #gets the chunks of the stem : (N,samples)
         

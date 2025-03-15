@@ -51,7 +51,9 @@ class Seq2SeqTrainer(nn.Module):
                  init_sample_temperature : float = 2.,
                  min_temperature : float = 0.5,
                  with_decay : bool = False,
-                 weighed_crossentropy : bool = False):
+                 weighed_crossentropy : bool = False,
+                 scheduled_sampling : bool = True,
+                 scheduler_alpha : float = 0.25):
         
         super().__init__()
         self.model=model
@@ -79,6 +81,10 @@ class Seq2SeqTrainer(nn.Module):
         self.track_size=track_size
         
         self.weighed_crossentropy = weighed_crossentropy
+        self.weights = None
+        
+        self.scheduled_sampling = scheduled_sampling
+        self.scheduler_alpha = scheduler_alpha
         
     def save_checkpoint(self, ckp_name):
         if not any(ckp_name.endswith(ext) for ext in (".pt",".pth")):
@@ -92,6 +98,7 @@ class Seq2SeqTrainer(nn.Module):
                         "pre_post_chunking":model.encoder.chunking_pre_post_encoding,
                         "vocab_size":self.model.codebook_size,
                         "learnable_codebook" : self.model.encoder.quantizer.learnable_codebook,
+                        "special_vq" : self.model.encoder.quantizer.is_special,
                         "chunk_size" : self.chunk_size,
                         "tracks_size" : self.track_size,
                         "max_len":self.model.pe.size,
@@ -104,6 +111,7 @@ class Seq2SeqTrainer(nn.Module):
                         "task" : "coupling" if type(model)==Seq2SeqCoupling else "completion",
                         "decoder_only":self.model.decision.decoder_only,
                         "transformer_layers":self.model.decision.layers,
+                        "relative_pe" : self.model.decision.relative_pe,
                         "dropout":self.model.decision.dropout,
                         "inner_dim":self.model.decision.inner_dim,
                         "heads":self.model.decision.heads,
@@ -249,7 +257,7 @@ class Seq2SeqTrainer(nn.Module):
         fig.savefig(f"runs/coupling/{name}_{self.trainer_name}.png")
         #fig.tight_layout()
         #fig.show()
-        #plt.close()
+        plt.close()
         
     def plot_loss_separate(self, epoch, train_losses_ce, train_losses_entropy, val_losses_ce, val_losses_entropy, train_acc, val_acc):
         fig, ax1 = plt.subplots(figsize=(10,10),dpi=150)
@@ -282,15 +290,15 @@ class Seq2SeqTrainer(nn.Module):
         gt = tgt_out.reshape(-1)
         
         pad_idx = self.model.special_tokens_idx["pad"] if self.model.use_special_tokens else -100
-        weights = None
-        if self.weighed_crossentropy:
-            density = torch.bincount(gt,minlength=self.model.vocab_size)
-            density = density/sum(density)
-            density = torch.where(density==0,1e-9,density)
-            weights = 1/density
-            weights = weights/sum(weights)
+        # weights = None
+        # if self.weighed_crossentropy:
+        #     density = torch.bincount(gt,minlength=self.model.vocab_size)
+        #     density = density/sum(density)
+        #     density = torch.where(density==0,1e-9,density)
+        #     weights = 1/density
+        #     weights = weights/sum(weights)
         
-        loss_ce = self.criterion(y, gt,ignore_index = pad_idx, weight = weights, label_smoothing=0.1) #reshqaped as (B*T,vocab_size) and (B*T,)
+        loss_ce = self.criterion(y, gt,ignore_index = pad_idx, weight = self.weights, label_smoothing=0.1) #reshqaped as (B*T,vocab_size) and (B*T,)
         
         loss_commit = self.codebook_loss_alpha*codebook_loss
         
@@ -348,6 +356,22 @@ class Seq2SeqTrainer(nn.Module):
             for optim in self.optimizer : optim.step()
         
         return loss, acc, separate_losses
+    @torch.no_grad
+    def _compute_class_weights(self,train_fetcher : Fetcher):
+        prYellow("Computing class weights...")
+        density=torch.zeros(self.model.vocab_size, device=self.model.device)
+        for _ in range(len(train_fetcher)):
+            inputs = next(train_fetcher)
+            src, src_pad_masks = inputs.src, inputs.src_padding_masks
+            src, src_idx, _ = self.model.encode(src,src_pad_masks)
+            density += torch.bincount(src_idx.reshape(-1),minlength=self.model.vocab_size)
+            
+        density = density/sum(density)
+        min_nonzero = density[density > 0].min()
+        density = torch.where(density == 0, min_nonzero, density)   
+        weights = 1/density
+        weights = weights/sum(weights) #normalize
+        return weights
                 
     def train(self, train_fetcher, val_fetcher,epochs, evaluate=True,reg_alpha=0.1, trial : optuna.trial.Trial = None):
         if evaluate :
@@ -387,6 +411,11 @@ class Seq2SeqTrainer(nn.Module):
         if self.gpu_id==0:
             progress_bar = tqdm(total=train_iter,initial=self.resume_epoch*len(train_fetcher))
         
+
+        if self.weighed_crossentropy:
+            self.weights = self._compute_class_weights(train_fetcher)
+            print(self.weights)
+        
         
         for epoch in range(self.resume_epoch,epochs):
             train_loss=0
@@ -404,8 +433,11 @@ class Seq2SeqTrainer(nn.Module):
                 pass
             
             #shceduled sampling probability
-            scheduled_prob = 1 - np.exp(-epoch/(0.1*epochs)) #exponential decay
-            print("schdeduled sampling prob =",scheduled_prob)
+            scheduled_prob = None
+            if self.scheduled_sampling:
+                scheduled_prob = min(0.95, 1 - np.exp(-epoch/(self.scheduler_alpha*epochs))) #exponential decay
+                #scheduled_prob = 1/(1+np.exp(-(epoch-epochs/2)/self.scheduler_alpha))
+                print(f"schdeduled sampling prob at epoch {epoch} =",scheduled_prob)
             
             for step in range(len(train_fetcher)):
                 if self.gpu_id==0:
@@ -470,11 +502,13 @@ class Seq2SeqTrainer(nn.Module):
                     self.plot_loss(epoch,train_losses_entropy, val_losses_entropy, train_accs, val_accs, "entropy_loss")
                     #self.plot_loss_separate(epoch,train_losses_ce,train_losses_entropy, val_losses_ce, val_losses_entropy, train_accs, val_accs)
                     
-            if val_acc>best_acc:#val_loss<best_loss:
+            if True:#val_loss<best_loss:#val_loss<best_loss:
                 best_loss=val_loss
                 best_codebook_usage = codebook_usage #like so they are not totally decorrelated during optim ?
+                best_acc = val_acc
                 if self.save_ckp:
                     if self.gpu_id==0 : #only save rank 0 model
+                        prGreen(f"Saving checkpoint : val_loss = {val_loss}, val_acc = {val_acc}")
                         #print('save ckp')
                         self.save_checkpoint(self.trainer_name+".pt") #save ckp as run name and add .pt extension
                     

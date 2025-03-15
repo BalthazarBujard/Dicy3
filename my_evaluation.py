@@ -39,6 +39,7 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
             src, tgt, src_pad_mask, tgt_pad_mask, _ = inputs.values()
             
             gt_tgt_idx = model.encode(tgt,tgt_pad_mask)[1]
+            gt_set = torch.unique(gt_tgt_idx) if force_coupling else None
             
             #generate output
             generated_tgt, generated_tgt_idx, probs = model.generate(src,src_pad_mask,k,
@@ -46,7 +47,7 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
                                                      max_len=src.size(1),
                                                      temperature=temperature,
                                                      entropy_weight=entropy_weight,
-                                                     tgt_gt=gt_tgt_idx if force_coupling else None)
+                                                     gt_set = gt_set)
             
             
 
@@ -256,6 +257,7 @@ def parse_args():
     parser.add_argument("--similarity_tgt_folder",default=None, type = Path, help="target folder to evaluate music similarity against groudn truth folder. Default is response folder")
     parser.add_argument("--similarity_gt_folder",default=None, type = Path, help="ground truth folder to evaluate music similarity. Default is the memory folder of generated tracks.")
     parser.add_argument("--root_folder", default = None, type = Path, help="root folder path")
+    parser.add_argument("--new_vq",action = 'store_true')
     args = parser.parse_args()
     
     del parser 
@@ -309,7 +311,7 @@ def main():
         
         #load model for generation or model eval
         if 'model' in args.task or 'symbolic_generation' in args.task or args.generate:
-            model,params,_ = load_model_checkpoint(model_ckp)
+            model,params,_ = load_model_checkpoint(model_ckp,data=args.data if args.new_vq else None)
             model.has_masking=False #during evaluation model doesnt mask time indices
             model.to(device)
             
@@ -321,8 +323,8 @@ def main():
             if args.k>=1: 
                 k = int(args.k)
             else : 
-                #k = args.k #total probability
-                k = round(args.k*model.codebook_size) #percentage of vocabulary size
+                k = args.k #total probability
+                #k = round(args.k*model.codebook_size) #percentage of vocabulary size
         
         
         path=os.path.abspath(__file__)

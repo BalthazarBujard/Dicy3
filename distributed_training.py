@@ -81,6 +81,7 @@ def build_model(args):
                                     decoder_only=decoder_only,
                                     inner_dim=inner_dim,
                                     heads=heads,
+                                    special_vq=args.special_vq,
                                     chunk_size=MAX_CHUNK_DURATION,
                                     data = args.data
                                     )
@@ -247,7 +248,9 @@ def main(rank, world_size, args):
                             chunk_size=args.chunk_duration,
                             track_size=args.track_duration,
                             resume_epoch=args.resume_epoch,
-                            weighed_crossentropy=weighed)
+                            weighed_crossentropy=weighed,
+                            scheduled_sampling = args.scheduled_sampling,
+                            scheduler_alpha=args.scheduler_alpha)
     
     epochs = args.epochs
     trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha)
@@ -269,11 +272,15 @@ if __name__=='__main__':
     
     run_id=args.run_id
     if run_id=='None' :
-        run_id = f"{args.data}_{args.chunk_duration}s_{args.track_duration}s_A{args.vocab_size}_{args.pre_post_chunking}_D{args.dim}"
-        run_id += f"_masking_{args.mask_prob}" if args.has_masking else ""
-        run_id+= "_learn_cb" if args.learnable_cb else ""
-        run_id+= "_restart_cb" if args.restart_codebook else ""
-    
+        # run_id = f"{args.data}_{args.chunk_duration}s_{args.track_duration}s_A{args.vocab_size}_{args.pre_post_chunking}_D{args.dim}"
+        # run_id += f"_masking_{args.mask_prob}" if args.has_masking else ""
+        # run_id+= "_learn_cb" if args.learnable_cb else ""
+        # run_id+= "_restart_cb" if args.restart_codebook else ""
+        run_id = f"{args.data}_{args.chunk_duration}s_A{args.vocab_size}"
+        run_id += "_shced_samp" if args.scheduled_sampling else ""
+        run_id += "_spec_vq" if args.special_vq else ""
+        run_id += "_rel_pe" if args.relative_pe else ""
+        
     
     new_run_id=run_id
     i=1
