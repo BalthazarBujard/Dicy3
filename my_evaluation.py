@@ -4,7 +4,7 @@ import torch
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from architecture.Model import load_model_checkpoint
 from MusicDataset.MusicDataset_v2 import Fetcher
-from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality, evaluate_similarity, compute_consecutive_lengths
+from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality, evaluate_similarity, compute_consecutive_lengths, compute_WER
 from utils.utils import predict_topK_P,prGreen,build_coupling_ds, extract_memory_path,prYellow, find_non_empty
 from utils.coupling_ds_generator import extract_all_groups
 from top_k_validity import compute_similarity
@@ -30,6 +30,7 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
     accs = []
     divs = []
     perplexs=[]
+    wers = []
     
     with torch.no_grad():
         for _ in tqdm(range(len(eval_fetcher))):
@@ -58,6 +59,9 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
             generated_tgt_idx = generated_tgt_idx[:,1:]
             probs = probs[:,1:]
             
+            #compute WER
+            wers.append(compute_WER(generated_tgt_idx, tgt_out, model.special_tokens_idx['eos']).item())
+            
             #print(probs.shape,generated_tgt_idx.shape)
             
             #compute perplexity of predicted sequence
@@ -84,9 +88,13 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
     perplexity = np.mean(perplexs)
     perplexity_std = np.std(perplexs)
     
+    wer = np.mean(wers)
+    wer_std = np.std(wers)
+    
     return Munch(accuracy={"mean":acc,"std":acc_std},
                  diversity={"mean":diversity,"std":diversity_std},
-                 perpleity={"mean":perplexity,"std":perplexity_std})
+                 perpleity={"mean":perplexity,"std":perplexity_std},
+                 WER = {"mean":wer, "std":wer_std},)
     
     
 
@@ -103,6 +111,7 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device :
     sims = []
     cb_usage=[]
     perplexs=[]
+    wers = []
     
     eos_idx = model.special_tokens_idx["eos"].to(device)
     codebook = model.vocab_embedding_table
@@ -128,6 +137,9 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device :
             
             #topK search
             preds = predict_topK_P(k,logits,tgt_out) #(B*T,)
+            
+            #compute WER
+            wers.append(compute_WER(tgt,tgt_out,eos_idx).item())
             
             #compute perplexity of predicted sequence
             probs = logits.softmax(-1)
@@ -167,6 +179,9 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device :
     cosine_sim = np.mean(sims[:,0])
     cosine_sim_std = np.mean(sims[:,1]) #mean std over top-K values (dont do another std otherwise its the std of the std)
     
+    wer = np.mean(wers)
+    wer_std = np.std(wers)
+    
     #torch.cuda.empty_cache()
     #del src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices, logits, tgt_idx, tgt_out, preds
     
@@ -174,7 +189,8 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device :
                  diversity={"mean":diversity,"std":diversity_std},
                  perpleity={"mean":perplexity,"std":perplexity_std},
                  codebook_usage = {"mean":codebook_usage,"std":codebook_usage_std},
-                 topK_sim = {"mean":cosine_sim,"std":cosine_sim_std})
+                 topK_sim = {"mean":cosine_sim,"std":cosine_sim_std},
+                 WER = {"mean":wer, "std":wer_std})
 
 def generate_eval_examples(tracks_list : List[List[Path]], 
                            model : Seq2SeqCoupling, 
@@ -257,7 +273,6 @@ def parse_args():
     parser.add_argument("--similarity_tgt_folder",default=None, type = Path, help="target folder to evaluate music similarity against groudn truth folder. Default is response folder")
     parser.add_argument("--similarity_gt_folder",default=None, type = Path, help="ground truth folder to evaluate music similarity. Default is the memory folder of generated tracks.")
     parser.add_argument("--root_folder", default = None, type = Path, help="root folder path")
-    parser.add_argument("--new_vq",action = 'store_true')
     args = parser.parse_args()
     
     del parser 
@@ -311,7 +326,7 @@ def main():
         
         #load model for generation or model eval
         if 'model' in args.task or 'symbolic_generation' in args.task or args.generate:
-            model,params,_ = load_model_checkpoint(model_ckp,data=args.data if args.new_vq else None)
+            model,params,_ = load_model_checkpoint(model_ckp,data=args.data)
             model.has_masking=False #during evaluation model doesnt mask time indices
             model.to(device)
             

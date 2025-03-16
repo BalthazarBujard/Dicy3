@@ -12,7 +12,7 @@ import numpy as np
 import glob
 from torcheval.metrics import WordErrorRate  # type: ignore
 
-def compute_WER(preds : torch.Tensor, gts : torch.Tensor, eos_idx : int):
+def compute_WER(preds : torch.Tensor, gts : torch.Tensor, eos_idx : int) -> torch.Tensor:
     """_summary_
     Compute the Word Error Rate of sequences
     Args:
