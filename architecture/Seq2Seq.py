@@ -9,7 +9,7 @@ from utils.utils import predict_topK_P
 from beam_search import BeamSearch, Candidate
 from typing import List
 from scipy.stats import entropy
-
+import numpy as np
 
 #TODO : IS THIS FUNCTION A METHOD OF SEQ2SEQBASE ?
 def create_pad_mask(x:torch.Tensor, eos_idx : int) -> torch.Tensor:
@@ -368,9 +368,9 @@ class Seq2SeqBase(nn.Module):
 
         for i in range(B * beam_width):
             for token in set(states[i].tolist()):  # Unique tokens in the sequence
-                print(f"before penalty on token {token}",probs[i, token])
+                #print(f"before penalty on token {token}",probs[i, token])
                 probs[i, token] /= penalty  # Reduce probability of repeated tokens
-                print(f"after penalty on token {token}",probs[i, token])
+                #print(f"after penalty on token {token}",probs[i, token])
 
         return probs.view(B, beam_width, vocab_size)  # Restore shape
     
@@ -467,7 +467,7 @@ class Seq2SeqBase(nn.Module):
         tgt_idx = torch.tensor([[c.states for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1) #remove extra dimension
         tgt = self.from_indexes_to_embeddings(tgt_idx)
         
-        probs = torch.tensor([[c.beam_probs for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1)
+        probs = torch.tensor(np.array([[c.beam_probs for c in nbest_candidate] for nbest_candidate in best_candidates]),device=self.device).squeeze(1)
         
         return tgt, tgt_idx, probs
 

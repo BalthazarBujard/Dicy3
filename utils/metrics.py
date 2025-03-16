@@ -22,8 +22,11 @@ def compute_WER(preds : torch.Tensor, gts : torch.Tensor, eos_idx : int) -> torc
     
     wer = WordErrorRate()
     for pred, gt in zip(preds,gts):
-        tgt = " ".join([str(idx.item()) for idx in pred[:torch.argwhere(pred==eos_idx)+1]])
-        gt_ = " ".join([str(idx.item()) for idx in gt[:torch.argwhere(gt==eos_idx)+1]])
+        pred_stop = torch.argwhere(pred==eos_idx)[0,0]+1 if torch.isin(eos_idx,pred) else len(pred)
+        tgt = " ".join([str(idx.item()) for idx in pred[:pred_stop]])
+        
+        gt_stop = torch.argwhere(gt==eos_idx)[0,0]+1 if torch.isin(eos_idx,gt) else len(gt)
+        gt_ = " ".join([str(idx.item()) for idx in gt[:gt_stop]])
 
         wer.update([tgt],[gt_])
     

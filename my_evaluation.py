@@ -28,68 +28,83 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
     diversity = 0 #predicted tokens entropy
     
     accs = []
+    acc, acc_std = 0,0
     divs = []
+    diversity, diversity_std = 0,0
     perplexs=[]
+    perplexity, perplexity_std = 0,0
     wers = []
+    wer, wer_std = 0,0
+    
+    eos_idx = model.special_tokens_idx['eos'].to(model.device)
+    
+    runs = 3
     
     with torch.no_grad():
-        for _ in tqdm(range(len(eval_fetcher))):
-            inputs = next(eval_fetcher)
-            
-            
-            src, tgt, src_pad_mask, tgt_pad_mask, _ = inputs.values()
-            
-            gt_tgt_idx = model.encode(tgt,tgt_pad_mask)[1]
-            gt_set = torch.unique(gt_tgt_idx) if force_coupling else None
-            
-            #generate output
-            generated_tgt, generated_tgt_idx, probs = model.generate(src,src_pad_mask,k,
-                                                     decoding_type=decoding,
-                                                     max_len=src.size(1),
-                                                     temperature=temperature,
-                                                     entropy_weight=entropy_weight,
-                                                     gt_set = gt_set)
-            
-            
+        for n in range(runs):
+            print(f"Run #{n+1}")
+            for _ in tqdm(range(len(eval_fetcher))):
+                inputs = next(eval_fetcher)
+                
+                
+                src, tgt, src_pad_mask, tgt_pad_mask, _ = inputs.values()
+                
+                gt_tgt_idx = model.encode(tgt,tgt_pad_mask)[1]
+                gt_set = torch.unique(gt_tgt_idx) if force_coupling else None
+                
+                #generate output
+                generated_tgt, generated_tgt_idx, probs = model.generate(src,src_pad_mask,k,
+                                                        decoding_type=decoding,
+                                                        max_len=gt_tgt_idx.size(1),
+                                                        temperature=temperature,
+                                                        entropy_weight=entropy_weight,
+                                                        gt_set = gt_set)
+                
+                
 
+                
+                
+                #remove <sos>
+                tgt_out = gt_tgt_idx[:,1:] 
+                generated_tgt_idx = generated_tgt_idx[:,1:]
+                probs = probs[:,1:]
+        
+                #compute WER
+                wers.append(compute_WER(generated_tgt_idx, tgt_out, eos_idx))
+                
+                #print(probs.shape,generated_tgt_idx.shape)
+                
+                #compute perplexity of predicted sequence
+                preds_probs = probs.reshape(-1,probs.size(-1)).gather(1,generated_tgt_idx.flatten().unsqueeze(1)).squeeze(1) #retrieve logits of predicted tokens (B*T,)
+                avg_nll = -sum(torch.log(preds_probs))/len(preds_probs)
+                ppl = avg_nll.exp()
+                perplexs.append(ppl.item())
+                
+                preds = generated_tgt_idx.reshape(-1) #(B*T,)
+                
+                #accuracy with topK
+                accs.append(compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=model.special_tokens_idx["pad"]))
+                
+                #diversity of pred
+                divs.append(compute_entropy(preds,min_length=model.vocab_size).item())
+                
+        
+            acc += np.mean(accs)
+            acc_std += np.std(accs)
             
+            diversity += np.mean(divs)
+            diversity_std += np.std(divs)
             
-            #remove <sos>
-            tgt_out = gt_tgt_idx[:,1:] 
-            generated_tgt_idx = generated_tgt_idx[:,1:]
-            probs = probs[:,1:]
+            perplexity += np.mean(perplexs)
+            perplexity_std += np.std(perplexs)
             
-            #compute WER
-            wers.append(compute_WER(generated_tgt_idx, tgt_out, model.special_tokens_idx['eos']).item())
-            
-            #print(probs.shape,generated_tgt_idx.shape)
-            
-            #compute perplexity of predicted sequence
-            preds_probs = probs.reshape(-1,probs.size(-1)).gather(1,generated_tgt_idx.flatten().unsqueeze(1)).squeeze(1) #retrieve logits of predicted tokens (B*T,)
-            avg_nll = -sum(torch.log(preds_probs))/len(preds_probs)
-            ppl = avg_nll.exp()
-            perplexs.append(ppl.item())
-            
-            preds = generated_tgt_idx.reshape(-1) #(B*T,)
-            
-            #accuracy with topK
-            accs.append(compute_accuracy(preds,tgt_out.reshape(-1),pad_idx=model.special_tokens_idx["pad"]))
-            
-            #diversity of pred
-            divs.append(compute_entropy(preds,min_length=model.vocab_size).item())
-            
+            wer += np.mean(wers)
+            wer_std += np.std(wers)
     
-    acc = np.mean(accs)
-    acc_std = np.std(accs)
-    
-    diversity = np.mean(divs)
-    diversity_std = np.std(divs)
-    
-    perplexity = np.mean(perplexs)
-    perplexity_std = np.std(perplexs)
-    
-    wer = np.mean(wers)
-    wer_std = np.std(wers)
+    acc, acc_std = acc/runs, acc_std/runs
+    diversity, diversity_std = diversity/runs, diversity_std/runs
+    perplexity, perplexity_std = perplexity/runs, perplexity_std/runs 
+    wer, wer_std = wer/runs, wer_std/runs
     
     return Munch(accuracy={"mean":acc,"std":acc_std},
                  diversity={"mean":diversity,"std":diversity_std},
@@ -133,13 +148,13 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device :
             #encoded inputs
             encoded_src = model.encoder.forward(src, padding_mask = src_pad_mask[0])[1] #only take cb indexes to compute entropy
                     
-            tgt_out = tgt_idx[:,1:] #ground truth (B,T)
+            tgt_out = tgt_idx[:,1:] #ground truth (B,T) without sos
             
             #topK search
             preds = predict_topK_P(k,logits,tgt_out) #(B*T,)
             
             #compute WER
-            wers.append(compute_WER(tgt,tgt_out,eos_idx).item())
+            wers.append(compute_WER(preds.reshape(logits.shape[:-1]),tgt_out,eos_idx).item())
             
             #compute perplexity of predicted sequence
             probs = logits.softmax(-1)
