@@ -10,6 +10,24 @@ from sklearn.mixture import GaussianMixture
 from librosa import load
 import numpy as np
 import glob
+from torcheval.metrics import WordErrorRate  # type: ignore
+
+def compute_WER(preds : torch.Tensor, gts : torch.Tensor, eos_idx : int):
+    """_summary_
+    Compute the Word Error Rate of sequences
+    Args:
+        preds (torch.Tensor): [batch size, sequence length] the predicted sequences
+        gts (torch.Tensor): [batch size, sequence length] the ground truth sequences
+    """
+    
+    wer = WordErrorRate()
+    for pred, gt in zip(preds,gts):
+        tgt = " ".join([str(idx.item()) for idx in pred[:torch.argwhere(pred==eos_idx)+1]])
+        gt_ = " ".join([str(idx.item()) for idx in gt[:torch.argwhere(gt==eos_idx)+1]])
+
+        wer.update([tgt],[gt_])
+    
+    return wer.compute()
 
 def compute_accuracy(pred_sequence, gt_sequence, pad_idx):
     correct = sum(1 for gt,pred in zip(gt_sequence,pred_sequence) if (gt==pred and gt != pad_idx))
