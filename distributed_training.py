@@ -83,7 +83,8 @@ def build_model(args):
                                     heads=heads,
                                     special_vq=args.special_vq,
                                     chunk_size=MAX_CHUNK_DURATION,
-                                    data = args.data
+                                    data = args.data,
+                                    relative_pe=args.relative_pe
                                     )
     return seq2seq
 
@@ -131,7 +132,7 @@ def build_ds(args):
     return train_roots,val_roots
 
 # WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
-def setup(rank, world_size,mastr_port=12350):
+def setup(rank, world_size,mastr_port=12339):
     #mastr_port=torch.randint(12355,12360)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'
@@ -250,7 +251,8 @@ def main(rank, world_size, args):
                             resume_epoch=args.resume_epoch,
                             weighed_crossentropy=weighed,
                             scheduled_sampling = args.scheduled_sampling,
-                            scheduler_alpha=args.scheduler_alpha)
+                            scheduler_alpha=args.scheduler_alpha,
+                            seq_nll_loss=args.seq_nll_loss)
     
     epochs = args.epochs
     trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha)
@@ -277,9 +279,9 @@ if __name__=='__main__':
         # run_id+= "_learn_cb" if args.learnable_cb else ""
         # run_id+= "_restart_cb" if args.restart_codebook else ""
         run_id = f"{args.data}_{args.chunk_duration}s_A{args.vocab_size}"
-        run_id += "_shced_samp" if args.scheduled_sampling else ""
-        run_id += "_spec_vq" if args.special_vq else ""
-        run_id += "_rel_pe" if args.relative_pe else ""
+        run_id += "_SchedSamp" if args.scheduled_sampling else ""
+        run_id += "_SpecVQ" if args.special_vq else ""
+        run_id += "_RelPE" if args.relative_pe else ""
         
     
     new_run_id=run_id

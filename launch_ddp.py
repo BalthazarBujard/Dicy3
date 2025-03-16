@@ -36,12 +36,13 @@ def train_parser():
     parser.add_argument('-lr_bb','--learning_rate_backbone',type=float,default=-1)
     parser.add_argument('--epochs',type=int,default=30)
     parser.add_argument("--scheduled_sampling", action = 'store_true')
-    parser.add_argument("--scheduler_alpha", type=float, default = 0.25)
+    parser.add_argument("--scheduler_alpha", type=float, default = 2)
     parser.add_argument('--batch_size',type=int,default=24)
     parser.add_argument('-decay','--weight_decay',type=float,default=1e-5)
     parser.add_argument('--reg_alpha',type=float,default=0.) # ++ -> probs seront uniforme : compromis entre variete et confidence
     parser.add_argument('--grad_accum',type=int,default=1)
     parser.add_argument('--weighed_crossentropy',action='store_true')
+    parser.add_argument("--seq_nll_loss",action = "store_true")
     parser.add_argument('--k',type=float,default=1)
     parser.add_argument('--run_id',type=str)
     parser.add_argument('--train_subset',action='store_true') #to do small trainings to find good parameters

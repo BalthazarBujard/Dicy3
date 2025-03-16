@@ -53,7 +53,8 @@ class Seq2SeqTrainer(nn.Module):
                  with_decay : bool = False,
                  weighed_crossentropy : bool = False,
                  scheduled_sampling : bool = True,
-                 scheduler_alpha : float = 0.25):
+                 scheduler_alpha : float = 2,
+                 seq_nll_loss : bool = False):
         
         super().__init__()
         self.model=model
@@ -85,6 +86,8 @@ class Seq2SeqTrainer(nn.Module):
         
         self.scheduled_sampling = scheduled_sampling
         self.scheduler_alpha = scheduler_alpha
+        
+        self.seq_nll_loss = seq_nll_loss
         
     def save_checkpoint(self, ckp_name):
         if not any(ckp_name.endswith(ext) for ext in (".pt",".pth")):
@@ -283,6 +286,34 @@ class Seq2SeqTrainer(nn.Module):
         ax2.grid()
         fig.savefig(f"runs/coupling/Loss_{self.trainer_name}_separate.png")
     
+    def sequence_nll_loss(self, logits : torch.Tensor, targets : torch.Tensor, pad_index: torch.Tensor) -> torch.Tensor:
+        """
+        Computes sequence-level Negative Log-Likelihood (NLL) loss.
+
+        Args:
+        - logits: (batch_size, seq_len, vocab_size) -> Model output logits.
+        - targets: (batch_size, seq_len) -> Ground truth token indices.
+        - padding_mask: (batch_size, seq_len) -> Boolean mask (True for padding).
+
+        Returns:
+        - loss: A scalar representing the sequence loss.
+        """
+        log_probs = F.log_softmax(logits, dim=-1)  # Convert logits to log probabilities
+        nll_loss = -log_probs.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
+
+        #construct padding mask from pad_index and targets
+        padding_mask = torch.where(targets==pad_index,torch.tensor(True,device=targets.device),torch.tensor(False,device=targets.device))
+        
+        # Apply padding mask
+        nll_loss = nll_loss * (~padding_mask)
+
+        # Sum over sequence and normalize
+        seq_loss = nll_loss.sum(dim=1)  # Sum across sequence
+        seq_lengths = (~padding_mask).sum(dim=1)  # Count valid tokens
+        loss_per_seq = seq_loss / seq_lengths.clamp(min=1)  # Avoid division by zero
+
+        return loss_per_seq.mean()
+    
     #TODO : ADD reg_alpha to class attributes ?
     def _compute_loss(self,logits,tgt_out,reg_alpha,codebook_loss) -> torch.Tensor :
         
@@ -290,15 +321,12 @@ class Seq2SeqTrainer(nn.Module):
         gt = tgt_out.reshape(-1)
         
         pad_idx = self.model.special_tokens_idx["pad"] if self.model.use_special_tokens else -100
-        # weights = None
-        # if self.weighed_crossentropy:
-        #     density = torch.bincount(gt,minlength=self.model.vocab_size)
-        #     density = density/sum(density)
-        #     density = torch.where(density==0,1e-9,density)
-        #     weights = 1/density
-        #     weights = weights/sum(weights)
         
-        loss_ce = self.criterion(y, gt,ignore_index = pad_idx, weight = self.weights, label_smoothing=0.1) #reshqaped as (B*T,vocab_size) and (B*T,)
+        if self.seq_nll_loss:
+            loss_ce = self.sequence_nll_loss(logits, tgt_out, pad_idx)
+        
+        else :
+            loss_ce = self.criterion(y, gt,ignore_index = pad_idx, weight = self.weights, label_smoothing=0.1) #reshqaped as (B*T,vocab_size) and (B*T,)
         
         loss_commit = self.codebook_loss_alpha*codebook_loss
         
@@ -343,7 +371,7 @@ class Seq2SeqTrainer(nn.Module):
                 prYellow(f"GT {tgt_out[1].numpy(force=True)}")
                 prYellow(f"Pred {preds[2].numpy(force=True)}")
                 prYellow(f"GT {tgt_out[2].numpy(force=True)}")
-                prRed(f"Pred {torch.argmax(logits[2],-1).numpy(force=True)}")
+                #prRed(f"Pred {torch.argmax(logits[2],-1).numpy(force=True)}")
                 prRed(f"{torch.topk(logits.softmax(-1)[2,:5],k=5)}") #show topk probs of 10 first tokens
                 prYellow(loss.item())
                 
@@ -435,9 +463,13 @@ class Seq2SeqTrainer(nn.Module):
             #shceduled sampling probability
             scheduled_prob = None
             if self.scheduled_sampling:
-                scheduled_prob = min(0.95, 1 - np.exp(-epoch/(self.scheduler_alpha*epochs))) #exponential decay
+                k = -np.log(1e-9) / self.scheduler_alpha
+                scheduled_prob = min(0.95, 1 - np.exp(-epoch*k/epochs)) #exponential decay
                 #scheduled_prob = 1/(1+np.exp(-(epoch-epochs/2)/self.scheduler_alpha))
                 print(f"schdeduled sampling prob at epoch {epoch} =",scheduled_prob)
+                
+                if scheduled_prob==0: scheduled_prob=None  #dont do scheduled sampling if none is needed
+                
             
             for step in range(len(train_fetcher)):
                 if self.gpu_id==0:
