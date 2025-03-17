@@ -201,7 +201,7 @@ if __name__=='__main__':
             save_dir = save_dir.joinpath(model_ckp.name) #os.path.join(save_dir,os.path.basename(model_ckp).split(".pt")[0]) 
         os.makedirs(save_dir,exist_ok=True)
         
-        model, params, _ = load_model_checkpoint(model_ckp)
+        model, params, _ = load_model_checkpoint(model_ckp, data = args.data)
         model.eval()
         _=model.to(DEVICE) 
 
@@ -213,8 +213,23 @@ if __name__=='__main__':
         k=args.k
         if k>=1:
             k=int(k)
+            
+        if args.memory!=None and args.source!=None:
+            generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
+                            args.with_coupling,args.remove,k,args.decoding_type, args.temperature, args.force_coupling,
+                            args.fade_time,
+                            save_dir,
+                            args.smaller,
+                            args.batch_size,
+                            compute_accuracy=args.compute_accuracy,
+                            max_duration=args.max_duration,
+                            device=DEVICE,
+                            mix_channels=args.mix_channels, 
+                            entropy_weight=args.entropy_weight,
+                            save_concat_args=args.save_concat_args,
+                            easy_name = args.easy_name)
         
-        if args.data!=None:
+        elif args.data!=None:
             generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
                               args.with_coupling,args.remove,
                             k, args.decoding_type, args.temperature, args.force_coupling,
@@ -230,19 +245,5 @@ if __name__=='__main__':
                             save_concat_args=args.save_concat_args,
                             easy_name = args.easy_name)
         
-        elif args.memory!=None and args.source!=None:
-            generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
-                            args.with_coupling,args.remove,k,args.decoding_type, args.temperature, args.force_coupling,
-                            args.fade_time,
-                            save_dir,
-                            args.smaller,
-                            args.batch_size,
-                            compute_accuracy=args.compute_accuracy,
-                            max_duration=args.max_duration,
-                            device=DEVICE,
-                            mix_channels=args.mix_channels, 
-                            entropy_weight=args.entropy_weight,
-                            save_concat_args=args.save_concat_args,
-                            easy_name = args.easy_name)
             
         else : raise ValueError("Either specify 'data' or give a source and memory path")
