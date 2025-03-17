@@ -266,7 +266,7 @@ def predict_topK_P(k,logits : torch.Tensor, tgt : Optional[torch.Tensor]=None, f
         preds = topP_search(k,logits_rs, tgts_rs)
         
     return preds
-#%%
+
 def build_coupling_ds(roots : List[List[Path]], 
                       batch_size : int, MAX_TRACK_DURATION, MAX_CHUNK_DURATION,
                     segmentation_strategy="uniform",
@@ -304,6 +304,27 @@ def build_coupling_ds(roots : List[List[Path]],
                         collate_fn=collate_fn,num_workers=2,pin_memory=True)
 
     fetcher = Fetcher(loader,device)
+    
+    return fetcher
+
+def build_fine_tuning_ds(guide_path : str, target_path : str, 
+                         max_track_duration : float, max_chunk_duration : float, 
+                         sampling_rate : int = 16000, segmentation: str = 'uniform', pre_segmentation : str = 'sliding',
+                         batch_size : Optional[int] = None, device : torch.cuda.device = None):
+    
+    from MusicDataset.MusicDataset_v2 import FineTuningDataset, DataCollatorForCoupling, Fetcher
+    from torch.utils.data import DataLoader
+    
+    collate_fn = DataCollatorForCoupling(unifrom_chunks=segmentation!="onset",sampling_rate=sampling_rate)
+    
+    ds = FineTuningDataset(guide_path, target_path, max_track_duration, max_chunk_duration, sampling_rate,segmentation, pre_segmentation)
+    
+    if batch_size == None:
+        batch_size = int(len(ds)*max_track_duration) #batch size is the whole track
+    
+    loader = DataLoader(ds, batch_size, shuffle=True,collate_fn=collate_fn)
+    
+    fetcher = Fetcher(loader, device)
     
     return fetcher
 

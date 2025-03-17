@@ -148,9 +148,9 @@ def generate_codebook(codebook_sizes : List[int], dim : int, chunk_duration : fl
 
 if __name__=="__main__":   
     
-    codebook_sizes = [512]#[2**n for n in range(4,11)]
-    chunk_durations = [0.5]
-    data="canonne"
+    codebook_sizes = [16, 64, 256]#[2**n for n in range(4,11)]
+    chunk_durations = [0.35]
+    data="moises"
     dim=768
     
     for chunk_duration in chunk_durations :

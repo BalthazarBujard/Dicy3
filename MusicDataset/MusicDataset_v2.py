@@ -867,7 +867,29 @@ class MusicCouplingDatasetv2(Dataset):
         
         return ValueError(f"index {index} not in interval")            
 
-
+class FineTuningDataset(Dataset):
+    def __init__(self,guide_path, target_path, max_track_duration, max_chunk_duration, sampling_rate, 
+                 segmentation_startegy="uniform", pre_segmentation='sliding', verbose=False):
+    
+        super().__init__()
+        
+        self.input_container = MusicContainerPostChunk(guide_path,max_track_duration,max_chunk_duration,sampling_rate,
+                                                segmentation_startegy,pre_segmentation=pre_segmentation,verbose=verbose)
+        
+        self.target_container = MusicContainerPostChunk(target_path,max_track_duration,max_chunk_duration,sampling_rate,
+                                                segmentation_startegy,pre_segmentation=pre_segmentation,verbose=verbose)
+        
+    def __len__(self):
+        return min([len(self.input_container), len(self.target_container)])
+    
+    def __getitem__(self, index) :
+        
+        input_chunks = self.input_container[index][0] #gets the chunks of the stem : (N,samples)
+        
+        target_chunks = self.target_container[index][0]
+                
+        return input_chunks, target_chunks
+    
 
 class MusicCouplingContainer(Dataset):
     def __init__(self,roots : List[Tuple[Union[str,Path],Union[str,Path]]],
