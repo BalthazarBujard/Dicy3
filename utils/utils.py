@@ -320,7 +320,7 @@ def build_fine_tuning_ds(guide_path : str, target_path : str,
     ds = FineTuningDataset(guide_path, target_path, max_track_duration, max_chunk_duration, sampling_rate,segmentation, pre_segmentation)
     
     if batch_size == None:
-        batch_size = int(len(ds)*max_track_duration) #batch size is the whole track
+        batch_size = len(ds) #batch size is the all track chunks
     
     
     loader = DataLoader(ds, batch_size, shuffle=True,collate_fn=collate_fn)
