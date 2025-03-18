@@ -14,7 +14,7 @@ from utils.utils import *
 from utils.metrics import compute_accuracy
 import matplotlib.pyplot as plt
 import numpy as np
-import time
+import time, os
 import optuna
 from munch import Munch 
 from typing import List,Union
@@ -90,7 +90,7 @@ class Seq2SeqTrainer(nn.Module):
         self.seq_nll_loss = seq_nll_loss
         
         
-    def save_checkpoint(self, ckp_name):
+    def save_checkpoint(self, ckp_name : str):
         if not any(ckp_name.endswith(ext) for ext in (".pt",".pth")):
             raise ValueError(f"checkpoint filename must end with .pt or .pth")
         
@@ -126,10 +126,10 @@ class Seq2SeqTrainer(nn.Module):
                         "run_id" : self.trainer_name
                         
                   } 
-        state_dict =self.model.state_dict() if isinstance(self.model,Seq2SeqBase) else self.model.module.state_dict() #if DDP model.module
+        state_dict = model.state_dict() #self.model.state_dict() if isinstance(self.model,Seq2SeqBase) else self.model.module.state_dict() #if DDP model.module
         optim_state_dict = [optim.state_dict() for optim in self.optimizer]
         torch.save({
-            "model_class":self.model.__class__,
+            "model_class":model.__class__,
             "state_dict":state_dict,
             "optimizer":optim_state_dict,
             "model_params":model_params,
@@ -387,6 +387,7 @@ class Seq2SeqTrainer(nn.Module):
             for optim in self.optimizer : optim.step()
         
         return loss, acc, separate_losses
+    
     @torch.no_grad
     def _compute_class_weights(self,train_fetcher : Fetcher):
         prYellow("Computing class weights...")
@@ -418,10 +419,12 @@ class Seq2SeqTrainer(nn.Module):
         val_losses_entropy = []
         train_accs = []
         val_accs=[]
-        epoch_0=self.resume_epoch
         if self.resume_epoch>0:
             try :
-                d=np.load(f"/data3/anasynth_nonbp/bujard/Dicy3/runs/coupling/eval_{self.trainer_name}.npy",allow_pickle=True).item()
+                path=os.path.abspath(__file__)
+                dir = os.path.dirname(path)
+                print("Current dir :", dir)
+                d=np.load(f"{dir}/runs/coupling/eval_{self.trainer_name}.npy",allow_pickle=True).item()
                 train_losses=d['train_loss']
                 val_losses=d['test_loss']
                 train_accs = d['train_acc']
@@ -487,6 +490,8 @@ class Seq2SeqTrainer(nn.Module):
                 
                 loss, acc, separate_losses = self._run_batch(train_fetcher,reg_alpha,step,trial,scheduled_prob)
                 loss_ce, loss_entropy, loss_commit = separate_losses
+                
+                print(separate_losses)
                 
                 train_loss+=loss.item()
                 train_loss_ce+=loss_ce.item()

@@ -54,16 +54,22 @@ class Backbone(nn.Module):
         return next(self.parameters()).device
     
     def freeze(self):
-        self.backbone.requires_grad_(False)
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+        #self.backbone.requires_grad_(False)
         self.frozen = True
     
     def freeze_feature_extractor(self):
         if self.type=="w2v":
             if isinstance(self.backbone, transformers.Wav2Vec2ForPreTraining):
-                self.backbone.wav2vec2.feature_extractor.requires_grad_(False)
+                for p in self.backbone.wav2vec2.feature_extractor.parameters():
+                    p.requires_grad = False
+                #self.backbone.wav2vec2.feature_extractor.requires_grad_(False)
             
             elif isinstance(self.backbone, fairseq.models.wav2vec.wav2vec2.Wav2Vec2Model):
-                self.backbone.feature_extractor.requires_grad_(False)
+                for p in self.backbone.feature_extractor.parameters():
+                    p.requires_grad = False
+                #self.backbone.feature_extractor.requires_grad_(False)
             
             else:
                 raise TypeError("Only HF or fairseq")
@@ -234,6 +240,7 @@ class LocalEncoder(nn.Module):
         self.dim = quantizer.dim       
         
         #self.out_proj=nn.Linear(embed_dim,self.dim) if self.dim != embed_dim else nn.Identity()
+    
     
     #collapse information accross time dimension
     def collapse(self, x : torch.Tensor, padding_mask : torch.Tensor) -> torch.Tensor:

@@ -23,7 +23,7 @@ def argparser():
     parser.add_argument('-lr','--learning_rate',type=float,default=1e-5)
     parser.add_argument('-lr_bb','--learning_rate_backbone',type=float,default=-1)
     parser.add_argument('-decay','--weight_decay',type=float,default=1e-5)
-    parser.add_argument('--epochs',type=int,default=5)
+    parser.add_argument('--steps',type=int,default=50)
     parser.add_argument("--scheduled_sampling", action = 'store_true')
     parser.add_argument("--scheduler_alpha", type=float, default = 4)
     
@@ -38,7 +38,10 @@ def main(args, device):
     # except KeyError:
     #     run_id = os.path.basename(args.ckp).split(".pt")[0]
     
-    
+    #Adapt only last layers of decisionprediction layer
+    #seq2seq.encoder.requires_grad_ = False
+    seq2seq.decision.adapt_output_layer()
+    seq2seq.decision.freeze_last_n_layers(2)
     
     guide_path = args.guide
     target_path = args.target
@@ -89,8 +92,9 @@ def main(args, device):
                             scheduled_sampling = args.scheduled_sampling,
                             scheduler_alpha=args.scheduler_alpha)
     
-    epochs = args.epochs
+    epochs = args.steps
     trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha, evaluate=val_fetcher!=None,save_every=-1)
+    
 
 
 

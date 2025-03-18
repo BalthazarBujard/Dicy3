@@ -37,6 +37,25 @@ class Decision(nn.Module):
     @property
     def device(self):
         return next(self.parameters()).device
+
+    def adapt_output_layer(self):
+        for p in self.decision.parameters():
+            p.requires_grad = False
+        
+        for p in self.output_layer.parameters():
+            p.requires_grad = True
+    
+    def freeze_last_n_layers(self,n:int):
+        total_layers = len(self.decision.layers)
+        
+        for i, layer in enumerate(self.decision.layers):
+            if i < total_layers - n:
+                for param in layer.parameters():
+                    param.requires_grad = False  # Freeze this layer
+            else:
+                for param in layer.parameters():
+                    param.requires_grad = True  # Keep this layer trainable
+
     
     def forward(self, src : torch.Tensor, tgt : torch.Tensor, 
                 src_mask : torch.Tensor = None, tgt_mask : torch.Tensor = None, 

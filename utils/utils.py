@@ -125,6 +125,12 @@ def model_params(checkpoint):
     params = ckp['model_params']
     for key, item in params.items():
         prYellow(f"{key} : {item}")
+    
+    prYellow(f"\nThe total number of params of the model are {count_model_params(ckp["state_dict"])}")
+        
+def count_model_params(state_dict : dict):
+    count=sum(p.numel() for p in state_dict.values())
+    return count
 
 
 def load_trained_backbone_from_classifier(pretrained_file, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt"):

@@ -201,7 +201,7 @@ if __name__=='__main__':
             save_dir = save_dir.joinpath(model_ckp.name) #os.path.join(save_dir,os.path.basename(model_ckp).split(".pt")[0]) 
         os.makedirs(save_dir,exist_ok=True)
         
-        model, params, _ = load_model_checkpoint(model_ckp, data = args.data)
+        model, params, _ = load_model_checkpoint(model_ckp)
         model.eval()
         _=model.to(DEVICE) 
 
