@@ -322,6 +322,7 @@ def build_fine_tuning_ds(guide_path : str, target_path : str,
     if batch_size == None:
         batch_size = int(len(ds)*max_track_duration) #batch size is the whole track
     
+    
     loader = DataLoader(ds, batch_size, shuffle=True,collate_fn=collate_fn)
     
     fetcher = Fetcher(loader, device)

@@ -22,7 +22,8 @@ def argparser():
     parser.add_argument("--pre_segmentation", type=str, default = "sliding", choices = ["sliding", "uniform"])
     parser.add_argument('-lr','--learning_rate',type=float,default=1e-5)
     parser.add_argument('-lr_bb','--learning_rate_backbone',type=float,default=-1)
-    parser.add_argument('--epochs',type=int,default=60)
+    parser.add_argument('-decay','--weight_decay',type=float,default=1e-5)
+    parser.add_argument('--epochs',type=int,default=5)
     parser.add_argument("--scheduled_sampling", action = 'store_true')
     parser.add_argument("--scheduler_alpha", type=float, default = 4)
     
@@ -31,10 +32,11 @@ def argparser():
 def main(args, device):
 
     seq2seq, params, _ = load_model_checkpoint(args.ckp)
-    try:
-        run_id = params['run_id']
-    except KeyError:
-        run_id = os.path.basename(args.ckp).split(".pt")[0]
+    run_id = args.run_id
+    # try:
+    #     run_id = params['run_id']
+    # except KeyError:
+    #     run_id = os.path.basename(args.ckp).split(".pt")[0]
     
     
     
@@ -61,9 +63,7 @@ def main(args, device):
     betas=(0.9, 0.999) #default betas for Adam
     reg_alpha = 0
     
-    k = args.k
-    if k>=1:
-        k=int(k)
+    k = 1 #for training k=1
     
     criterion = torch.nn.functional.cross_entropy #torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     
@@ -90,7 +90,7 @@ def main(args, device):
                             scheduler_alpha=args.scheduler_alpha)
     
     epochs = args.epochs
-    trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha, evaluate=val_fetcher!=None)
+    trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha, evaluate=val_fetcher!=None,save_every=-1)
 
 
 
@@ -102,27 +102,21 @@ if __name__=='__main__':
     
     args = argparser().parse_args()
     
-    run_id=args.run_id
-    if run_id=='None' :
-        # run_id = f"{args.data}_{args.chunk_duration}s_{args.track_duration}s_A{args.vocab_size}_{args.pre_post_chunking}_D{args.dim}"
-        # run_id += f"_masking_{args.mask_prob}" if args.has_masking else ""
-        # run_id+= "_learn_cb" if args.learnable_cb else ""
-        # run_id+= "_restart_cb" if args.restart_codebook else ""
-        run_id = f"{args.data}_{args.chunk_duration}s_A{args.vocab_size}"
-        run_id += "_SchedSamp" if args.scheduled_sampling else ""
-        run_id += "_SpecVQ" if args.special_vq else ""
-        run_id += "_RelPE" if args.relative_pe else ""
-        
+    run_id=str(args.ckp.stem)+"_fine_tune"
     
     new_run_id=run_id
     i=1
-    while os.path.exists(f"runs/coupling/{new_run_id}.pt") and args.resume_ckp=='': #find new name if not resume training
+    while os.path.exists(f"runs/coupling/{new_run_id}.pt"): #find new name
         new_run_id=run_id+f'_{i}'
         i+=1
     args.run_id=new_run_id
     
+    print(args.run_id)
+    
     #save config_file
     with open(f'runs/coupling/train_args_{args.run_id}.txt', 'w') as f:
-        json.dump(args.__dict__, f, indent=2)
+        args_dict = args.__dict__
+        args_dict["ckp"]=str(args_dict["ckp"])
+        json.dump(args_dict, f, indent=2)
     
     main(args, device)

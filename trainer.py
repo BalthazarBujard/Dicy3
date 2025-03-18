@@ -89,6 +89,7 @@ class Seq2SeqTrainer(nn.Module):
         
         self.seq_nll_loss = seq_nll_loss
         
+        
     def save_checkpoint(self, ckp_name):
         if not any(ckp_name.endswith(ext) for ext in (".pt",".pth")):
             raise ValueError(f"checkpoint filename must end with .pt or .pth")
@@ -102,6 +103,7 @@ class Seq2SeqTrainer(nn.Module):
                         "vocab_size":self.model.codebook_size,
                         "learnable_codebook" : self.model.encoder.quantizer.learnable_codebook,
                         "special_vq" : self.model.encoder.quantizer.is_special,
+                        "vq_data" : self.model.encoder.quantizer.data,
                         "chunk_size" : self.chunk_size,
                         "tracks_size" : self.track_size,
                         "max_len":self.model.pe.size,
@@ -365,14 +367,15 @@ class Seq2SeqTrainer(nn.Module):
         
         if step%5==0 and trial==None:
             if self.gpu_id==0:
-                prYellow(f"Pred {preds[0].numpy(force=True)}")
-                prYellow(f"GT {tgt_out[0].numpy(force=True)}")
-                prYellow(f"Pred {preds[1].numpy(force=True)}")
-                prYellow(f"GT {tgt_out[1].numpy(force=True)}")
-                prYellow(f"Pred {preds[2].numpy(force=True)}")
-                prYellow(f"GT {tgt_out[2].numpy(force=True)}")
+                for i in range(min(3,len(preds))):
+                    prYellow(f"Pred {preds[i].numpy(force=True)}")
+                    prYellow(f"GT {tgt_out[i].numpy(force=True)}")
+                # prYellow(f"Pred {preds[1].numpy(force=True)}")
+                # prYellow(f"GT {tgt_out[1].numpy(force=True)}")
+                # prYellow(f"Pred {preds[2].numpy(force=True)}")
+                # prYellow(f"GT {tgt_out[2].numpy(force=True)}")
                 #prRed(f"Pred {torch.argmax(logits[2],-1).numpy(force=True)}")
-                prRed(f"{torch.topk(logits.softmax(-1)[2,:5],k=5)}") #show topk probs of 10 first tokens
+                prRed(f"{torch.topk(logits.softmax(-1)[i,:5],k=5)}") #show topk probs of 10 first tokens
                 prYellow(loss.item())
                 
                 
@@ -401,7 +404,7 @@ class Seq2SeqTrainer(nn.Module):
         weights = weights/sum(weights) #normalize
         return weights
                 
-    def train(self, train_fetcher, val_fetcher,epochs, evaluate=True,reg_alpha=0.1, trial : optuna.trial.Trial = None):
+    def train(self, train_fetcher, val_fetcher,epochs, evaluate=True,reg_alpha=0.1, trial : optuna.trial.Trial = None, save_every : int = 1):
         if evaluate :
             assert val_fetcher != None, "To evaluate the model a validation set is needed."
         
@@ -444,6 +447,9 @@ class Seq2SeqTrainer(nn.Module):
             self.weights = self._compute_class_weights(train_fetcher)
             print(self.weights)
         
+        
+        if save_every==-1:
+            save_every = epochs #save on last epoch
         
         for epoch in range(self.resume_epoch,epochs):
             train_loss=0
@@ -539,7 +545,7 @@ class Seq2SeqTrainer(nn.Module):
                 best_codebook_usage = codebook_usage #like so they are not totally decorrelated during optim ?
                 best_acc = val_acc
                 if self.save_ckp:
-                    if self.gpu_id==0 : #only save rank 0 model
+                    if self.gpu_id==0 and (epoch+1)%save_every==0: #only save rank 0 model
                         prGreen(f"Saving checkpoint : val_loss = {val_loss}, val_acc = {val_acc}")
                         #print('save ckp')
                         self.save_checkpoint(self.trainer_name+".pt") #save ckp as run name and add .pt extension

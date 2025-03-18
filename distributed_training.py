@@ -132,7 +132,7 @@ def build_ds(args):
     return train_roots,val_roots
 
 # WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
-def setup(rank, world_size,mastr_port=12323):
+def setup(rank, world_size,mastr_port=12355):
     #mastr_port=torch.randint(12355,12360)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'

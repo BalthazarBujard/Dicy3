@@ -22,7 +22,7 @@ class myDDP(DDP):
 #script to build different models and load checkpopints
 
 #TODO : NOW THE SEQ2SEQ BUILDER CAN TAKE **KWARGS FROM DICT
-def load_model_checkpoint(ckp_path:Path, data : str = None, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Tuple[Union[Seq2SeqBase,Seq2SeqCoupling], dict, dict] :
+def load_model_checkpoint(ckp_path:Path, backbone_checkpoint="/data3/anasynth_nonbp/bujard/w2v_music_checkpoint.pt") -> Tuple[Union[Seq2SeqBase,Seq2SeqCoupling], dict, dict] :
     
     ckp = torch.load(ckp_path, map_location=torch.device("cpu"))
     model_class = ckp["model_class"]
@@ -57,9 +57,11 @@ def load_model_checkpoint(ckp_path:Path, data : str = None, backbone_checkpoint=
         
     try :
         special_vq = model_params['special_vq']
+        data = model_params["vq_data"]
         assert data is not None, "If special VQ, specify which data is the VQ from..."
     except :
         special_vq = False
+        data = None
     
     try :
         relative_pe = model_params["relative_pe"]
@@ -108,7 +110,7 @@ def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, rest
     else :
         centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{dim}.npy",allow_pickle=True)
     centers=torch.from_numpy(centers)
-    vq = KmeansQuantizer(centers,learnable_codebook,dim,restart,is_special)
+    vq = KmeansQuantizer(centers,learnable_codebook,dim,restart,is_special, data)
     
     return vq
     

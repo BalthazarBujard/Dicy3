@@ -10,7 +10,7 @@ from typing import Union, Tuple
 
 #vector quantiozer from pre-computed centers with kmeans algorithm
 class KmeansQuantizer(nn.Module):
-    def __init__(self,centers : Union[np.ndarray,torch.Tensor], learnable_codebook : bool, dim : int = 768, restart : bool = False, is_special : bool = True):
+    def __init__(self,centers : Union[np.ndarray,torch.Tensor], learnable_codebook : bool, dim : int = 768, restart : bool = False, is_special : bool = True, data : str = None):
         super().__init__()
         
         if isinstance(centers,np.ndarray) : centers = torch.from_numpy(centers)
@@ -43,6 +43,7 @@ class KmeansQuantizer(nn.Module):
         
         #for easier checkpoint loading and compatibility
         self.is_special = is_special
+        self.data = data
     
     @property
     def device(self):
