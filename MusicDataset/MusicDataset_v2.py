@@ -125,6 +125,9 @@ class MusicContainer(Dataset):
         
         try:
             chunk, _ = load(path, sr = self.sampling_rate, offset=start, duration=duration, mono=True)
+            if duration < self.max_duration: #pad to have uniform chunks when batching
+                diff = int((self.max_duration-duration)*self.sampling_rate)
+                chunk = np.concatenate([chunk,np.zeros(diff)])
             
             if self.segmentation_strategy in ['one','uniform','sliding'] and self.non_empty:
                 #if one chunk per track, be sure it has something in it. NOT TO BE DONE DURING TRAINING
@@ -340,8 +343,9 @@ class MusicContainer(Dataset):
             if N > 0:
                 chunks = [[i*self.max_duration,(i+1)*self.max_duration] for i in range(N)]
                 
-                #if r != 0:
-                #    chunks += [[N*self.max_duration,N*self.max_duration+r]]
+                #Careful could raise error if tracks not of samne length (?)
+                if r != 0:
+                   chunks += [[N*self.max_duration,N*self.max_duration+r]]
             else :
                 chunks = [[0, duration]]
         
@@ -361,7 +365,10 @@ class MusicContainer(Dataset):
             for start in np.arange(0, duration, self.hop_size):
                 end = start + self.max_duration
                 
-                if end > duration : #dont take last chunk if greater 
+                if end > duration : #MAybe xould raise error --> dont take last chunk if greater 
+                    end = duration
+                    chunk = [start,end]
+                    chunks.append(chunk)
                     break
                 
                 chunk = [start,end]
