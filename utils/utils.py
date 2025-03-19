@@ -126,7 +126,7 @@ def model_params(checkpoint):
     for key, item in params.items():
         prYellow(f"{key} : {item}")
     
-    prYellow(f"\nThe total number of params of the model are {count_model_params(ckp["state_dict"])}")
+    #prYellow(f"\nThe total number of params of the model are {count_model_params(ckp["state_dict"])}")
         
 def count_model_params(state_dict : dict):
     count=sum(p.numel() for p in state_dict.values())

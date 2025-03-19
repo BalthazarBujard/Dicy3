@@ -241,6 +241,9 @@ class LocalEncoder(nn.Module):
         
         #self.out_proj=nn.Linear(embed_dim,self.dim) if self.dim != embed_dim else nn.Identity()
     
+    @property
+    def device(self):
+        return next(self.parameters()).device
     
     #collapse information accross time dimension
     def collapse(self, x : torch.Tensor, padding_mask : torch.Tensor) -> torch.Tensor:

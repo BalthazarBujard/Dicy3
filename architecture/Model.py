@@ -117,7 +117,7 @@ def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, rest
 
 def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone : bool, dim : int, 
                        vocab_size : int, learnable_codebook : bool, restart_codebook : bool,
-                       chunking : str, encoder_head : str, condense_type : str = None, 
+                       chunking : str = "post", encoder_head : str = "mean", condense_type : str = None, 
                        special_vq: bool = True, chunk_size : float = None, data : str = None) -> LocalEncoder:
     
     output_final_proj = dim==256 #if model dimension is 256 we want the final projection output, else 768 hidden layer output dim

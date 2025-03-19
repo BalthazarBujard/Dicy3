@@ -16,7 +16,7 @@ def train_parser():
     parser.add_argument('--dim', type = int, choices=[256,768], default=768)
     parser.add_argument('--freeze_backbone',action='store_true')
     #prRed("TRAINIGN BACKBONE")
-    parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],required=True)
+    parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],required=True) #remove required since ckp reloading doesnt need it
     parser.add_argument("--special_vq", action='store_true')
     parser.add_argument('--learnable_cb',action='store_true')
     parser.add_argument('-restart','--restart_codebook',action='store_true')
@@ -48,7 +48,7 @@ def train_parser():
     parser.add_argument('--train_subset',action='store_true') #to do small trainings to find good parameters
     parser.add_argument('--data',choices=['all','canonne','moises'])
     parser.add_argument('--resume_ckp',default='')
-    parser.add_argument('--resume_epoch',type=int,default=0)
+    #parser.add_argument('--resume_epoch',type=int,default=0)
     
     
     return parser#.parse_args()

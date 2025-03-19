@@ -99,15 +99,16 @@ def build_ds(args):
     T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{train_set}/A3"
 
     moisesdb_train = Path(f"../data/moisesdb_v2/{train_set}")
-    moises_tracks = extract_all_groups(moisesdb_train,instruments_to_ignore=["drums", "percussions", "other"])
     
     
     
     if args.data=='all':
+        moises_tracks = extract_all_groups(moisesdb_train,instruments_to_ignore=["drums", "percussions", "other"])
         train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
     if args.data=='canonne':
         train_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]
     if args.data=='moises':
+        moises_tracks = extract_all_groups(moisesdb_train,instruments_to_ignore=["drums", "percussions", "other"])
         train_roots=moises_tracks
 
     val_set = "val" if not args.train_subset else "val_subset"
@@ -119,14 +120,14 @@ def build_ds(args):
     T_A3 = f"/data3/anasynth_nonbp/bujard/data/BasesDeDonnees/ClementCannone_Trios/4analysis_Exports_Impros_Coupees_Niveau/{val_set}/A3"
 
     moisesdb_val = Path(f"../data/moisesdb_v2/{val_set}")
-    moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=["drums", "percussions", "other"])
-
 
     if args.data=='all':
+        moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=["drums", "percussions", "other"])
         val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]+moises_tracks
     elif args.data=='canonne':
         val_roots=[[D_A1,D_A2],[T_A1,T_A2,T_A3]]
     elif args.data=='moises':
+        moises_tracks = extract_all_groups(moisesdb_val,instruments_to_ignore=["drums", "percussions", "other"])
         val_roots=moises_tracks
     
     return train_roots,val_roots
@@ -184,6 +185,7 @@ def main(rank, world_size, args):
     run_id = args.run_id
 
     if args.resume_ckp!='':
+        print("Reloading Model from ckp :",args.resume_ckp)
         seq2seq, params, optim_state_dict = load_model_checkpoint(args.resume_ckp)
         try:
             run_id = params['run_id']
@@ -192,7 +194,7 @@ def main(rank, world_size, args):
     
     else : seq2seq=build_model(args)
     
-    
+    print(run_id)
     
     lr = args.learning_rate
     lr_bb = lr if args.learning_rate_backbone == -1 else args.learning_rate_backbone
@@ -248,14 +250,15 @@ def main(rank, world_size, args):
                             codebook_loss_weight=codebook_loss_weight,
                             chunk_size=args.chunk_duration,
                             track_size=args.track_duration,
-                            resume_epoch=args.resume_epoch,
+                            #resume_epoch=args.resume_epoch,
+                            resume_ckp=args.resume_ckp,
                             weighed_crossentropy=weighed,
                             scheduled_sampling = args.scheduled_sampling,
                             scheduler_alpha=args.scheduler_alpha,
                             seq_nll_loss=args.seq_nll_loss)
     
     epochs = args.epochs
-    trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha)
+    trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha) 
     
     cleanup() #destroy process
 

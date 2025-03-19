@@ -43,6 +43,8 @@ def main(args, device):
     seq2seq.decision.adapt_output_layer()
     seq2seq.decision.freeze_last_n_layers(2)
     
+    print(next(seq2seq.encoder.quantizer.parameters()).requires_grad)
+    
     guide_path = args.guide
     target_path = args.target
     
@@ -93,7 +95,7 @@ def main(args, device):
                             scheduler_alpha=args.scheduler_alpha)
     
     epochs = args.steps
-    trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha, evaluate=val_fetcher!=None,save_every=-1)
+    trainer.train(train_fetcher,val_fetcher,epochs,reg_alpha=reg_alpha, evaluate=val_fetcher!=None,save_every=epochs)
     
 
 

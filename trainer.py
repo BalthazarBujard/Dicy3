@@ -47,7 +47,8 @@ class Seq2SeqTrainer(nn.Module):
                  k : int = None,
                  chunk_size : float = 0.5,
                  track_size : float = 30,
-                 resume_epoch : int =0,
+                 #resume_epoch : int =0,
+                 resume_ckp : str = "",
                  init_sample_temperature : float = 2.,
                  min_temperature : float = 0.5,
                  with_decay : bool = False,
@@ -66,7 +67,8 @@ class Seq2SeqTrainer(nn.Module):
         self.trainer_name = trainer_name
         self.segmentation = segmentation
         self.save_ckp=save_ckp
-        self.resume_epoch = resume_epoch
+        #self.resume_epoch = resume_epoch
+        self.resume_ckp=resume_ckp
         
         #VQ parameters (not used if kmeans vq)
         self.codebook_loss_alpha = codebook_loss_weight
@@ -90,7 +92,7 @@ class Seq2SeqTrainer(nn.Module):
         self.seq_nll_loss = seq_nll_loss
         
         
-    def save_checkpoint(self, ckp_name : str):
+    def save_checkpoint(self, ckp_name : str, perfs : dict):
         if not any(ckp_name.endswith(ext) for ext in (".pt",".pth")):
             raise ValueError(f"checkpoint filename must end with .pt or .pth")
         
@@ -133,9 +135,11 @@ class Seq2SeqTrainer(nn.Module):
             "state_dict":state_dict,
             "optimizer":optim_state_dict,
             "model_params":model_params,
+            "perfs" : perfs
             },"runs/coupling/"+ckp_name)
     
     #TODO : FIND HOW TO RELOAD CHECKPOINT DURING DDP TRAINING
+    # check : https://stackoverflow.com/questions/70386800/what-is-the-proper-way-to-checkpoint-during-training-when-using-distributed-data
     def load_checkpoint(self,checkpoint_name):
         print("ici avec rank :",self.gpu_id)
         #torch.distributed.init_process_group("nccl",rank=self.gpu_id,world_size = torch.distributed.get_world_size())
@@ -239,10 +243,11 @@ class Seq2SeqTrainer(nn.Module):
         
         return loss, acc, cb_usage, separate_losses
     
-    def plot_loss(self, epoch, train_losses, val_losses, train_acc, val_acc,name):
+    def plot_loss(self, epoch, train_losses, val_losses, train_acc, val_acc, name):
         fig, ax1 = plt.subplots(figsize=(10,10),dpi=150)
         ax2=ax1.twinx()
         epochs = range(1,epoch+2)
+        #print(len(epochs),len(train_losses), len(val_losses), len(train_acc), len(val_acc))
         #plt.figure(figsize=(10,10),dpi=150)
         ax1.plot(epochs,train_losses,label="train loss", color="tab:blue")
         ax2.plot(epochs,train_acc,"--",label="train accuracy",color="tab:green")
@@ -414,24 +419,64 @@ class Seq2SeqTrainer(nn.Module):
         train_losses=[]
         train_losses_ce = []
         train_losses_entropy = []
+        train_losses_commit=[]
         val_losses=[]
         val_losses_ce = []
         val_losses_entropy = []
+        val_losses_commit=[]
         train_accs = []
         val_accs=[]
-        if self.resume_epoch>0:
+        resume_epoch=0
+        if self.resume_ckp!="":
             try :
-                path=os.path.abspath(__file__)
-                dir = os.path.dirname(path)
-                print("Current dir :", dir)
-                d=np.load(f"{dir}/runs/coupling/eval_{self.trainer_name}.npy",allow_pickle=True).item()
-                train_losses=d['train_loss']
-                val_losses=d['test_loss']
-                train_accs = d['train_acc']
-                val_accs = d['test_acc']
-                self.resume_epoch = len(train_losses) #reassign value to avoir error during plot etc
-            except:
-                pass
+                # path=os.path.abspath(__file__)
+                # dir = os.path.dirname(path)
+                # print("Current dir :", dir)
+                # d=np.load(f"{dir}/runs/coupling/eval_{self.trainer_name}.npy",allow_pickle=True).item()
+                ckp = torch.load(self.resume_ckp,map_location="cpu") 
+                perfs = ckp["perfs"]
+                train_losses=perfs['train_loss']
+                train_losses_ce=perfs["train_loss_ce"]
+                train_losses_commit=perfs["train_loss_commit"]
+                train_losses_entropy=perfs["train_loss_entropy"]
+                train_accs = perfs['train_acc']
+                
+                val_losses=perfs['test_loss']
+                val_losses_ce=perfs["test_loss_ce"]
+                val_losses_commit=perfs["test_loss_commit"]
+                val_losses_entropy=perfs["test_loss_entropy"]
+                val_accs = perfs['test_acc']
+                
+                resume_epoch = len(train_losses) #assign value to avoir error during plot etc
+                
+                
+                #del ckp #delete checkpoint after loading performances
+                
+            except KeyError as e:
+                print(f"Problem loading performances form checkpoint {self.resume_ckp}")
+                print("Trying to load from eval*.npy file")
+                ckp_path = Path(self.resume_ckp)
+                path = f"{ckp_path.parent}/eval_{ckp_path.stem}.npy"
+                perfs = np.load(path,allow_pickle=True).item()
+                                
+                train_losses=perfs['train_loss']
+                #old versions dont save all losses separately so we copy them
+                train_losses_ce=perfs["train_loss"].copy()
+                train_losses_commit=perfs["train_loss"].copy()
+                train_losses_entropy=perfs["train_loss"].copy()
+                train_accs = perfs['train_acc']
+                
+                val_losses=perfs['test_loss']
+                #old versions dont save all losses separately so we copy them
+                val_losses_ce=perfs["test_loss"].copy()
+                val_losses_commit=perfs["test_loss"].copy()
+                val_losses_entropy=perfs["test_loss"].copy()
+                val_accs = perfs['test_acc']
+                
+                resume_epoch = len(train_losses) #assign value to avoir error during plot etc
+                #print("Resume epoch =", resume_epoch)
+                
+                
         
         best_loss = float('inf') if len(val_losses)==0 else min(val_losses)
         best_acc = 0 if len(val_accs)==0 else max(val_accs)
@@ -443,18 +488,15 @@ class Seq2SeqTrainer(nn.Module):
         
         iter_count=0
         if self.gpu_id==0:
-            progress_bar = tqdm(total=train_iter,initial=self.resume_epoch*len(train_fetcher))
+            progress_bar = tqdm(total=train_iter,initial=resume_epoch*len(train_fetcher))
         
 
         if self.weighed_crossentropy:
             self.weights = self._compute_class_weights(train_fetcher)
             print(self.weights)
         
-        
-        if save_every==-1:
-            save_every = epochs #save on last epoch
-        
-        for epoch in range(self.resume_epoch,epochs):
+        for epoch in range(resume_epoch,epochs):
+            print("Current epoch =", epoch+1)
             train_loss=0
             train_loss_ce=0
             train_loss_entropy=0
@@ -475,7 +517,7 @@ class Seq2SeqTrainer(nn.Module):
                 k = -np.log(1e-9) / self.scheduler_alpha
                 scheduled_prob = min(0.95, 1 - np.exp(-epoch*k/epochs)) #exponential decay
                 #scheduled_prob = 1/(1+np.exp(-(epoch-epochs/2)/self.scheduler_alpha))
-                print(f"schdeduled sampling prob at epoch {epoch} =",scheduled_prob)
+                print(f"schdeduled sampling prob at epoch {epoch+1} =",scheduled_prob)
                 
                 if scheduled_prob==0: scheduled_prob=None  #dont do scheduled sampling if none is needed
                 
@@ -491,7 +533,7 @@ class Seq2SeqTrainer(nn.Module):
                 loss, acc, separate_losses = self._run_batch(train_fetcher,reg_alpha,step,trial,scheduled_prob)
                 loss_ce, loss_entropy, loss_commit = separate_losses
                 
-                print(separate_losses)
+                #print(separate_losses)
                 
                 train_loss+=loss.item()
                 train_loss_ce+=loss_ce.item()
@@ -512,9 +554,15 @@ class Seq2SeqTrainer(nn.Module):
             train_loss_entropy = train_loss_entropy/len(train_fetcher)
             
             train_losses.append(train_loss)
+            #print("after appending new train_loss:",len(train_losses),len(train_losses_ce),len(train_losses_commit),len(train_losses_entropy))
             train_losses_ce.append(train_loss_ce)
+            #print("after appending new ce_loss:",len(train_losses),len(train_losses_ce),len(train_losses_commit),len(train_losses_entropy))
             train_losses_entropy.append(train_loss_entropy)
+            #print("after appending new entropy_loss:",len(train_losses),len(train_losses_ce),len(train_losses_commit),len(train_losses_entropy))
+            train_losses_commit.append(train_loss_commit)
             
+            #print("after appending new commit_loss:",len(train_losses),len(train_losses_ce),len(train_losses_commit),len(train_losses_entropy))
+                            
             train_acc/=len(train_fetcher)
             train_accs.append(train_acc)
             
@@ -523,26 +571,35 @@ class Seq2SeqTrainer(nn.Module):
             if evaluate:
                 val_loss, val_acc, codebook_usage, separate_losses_val = self.evaluate(val_fetcher, reg_alpha, scheduled_prob)
                 val_loss = val_loss.item()
+                loss_ce_val, loss_entropy_val, loss_commit_val = separate_losses_val
+                loss_ce_val = loss_ce_val.item() 
+                loss_entropy_val = loss_entropy_val.item() 
+                loss_commit_val = loss_commit_val.item() 
                 prGreen(f"Validation loss at epoch {epoch+1}/{epochs} : {val_loss}. Accuracy = {val_acc}")
             
             else : 
                 val_loss = train_loss #for checkpooint saving
                 val_acc = train_acc
                 codebook_usage=best_codebook_usage
-                separate_losses_val = separate_losses
+                loss_ce_val, loss_entropy_val, loss_commit_val = train_loss_ce, train_loss_entropy, train_loss_commit
             
-            loss_ce_val, loss_entropy_val, loss_commit_val = separate_losses_val
+            
             
             val_losses.append(val_loss) 
-            val_losses_ce.append(loss_ce_val.item())
-            val_losses_entropy.append(loss_entropy_val.item())
-            val_accs.append(val_acc)   
+            val_losses_ce.append(loss_ce_val)
+            val_losses_entropy.append(loss_entropy_val)
+            val_losses_commit.append(loss_commit_val)
+            val_accs.append(val_acc) 
             
+            #print("after appending new loss (val):",len(train_losses),len(train_losses_ce),len(train_losses_commit),len(train_losses_entropy))
+            
+                        
             if epoch>0 and trial==None:   
                 if self.gpu_id==0:
                     self.plot_loss(epoch,train_losses, val_losses, train_accs, val_accs, "total_loss")
                     self.plot_loss(epoch,train_losses_ce, val_losses_ce, train_accs, val_accs, "crossentropy_loss")
                     self.plot_loss(epoch,train_losses_entropy, val_losses_entropy, train_accs, val_accs, "entropy_loss")
+                    self.plot_loss(epoch,train_losses_commit, val_losses_commit, train_accs, val_accs, "commit_loss")
                     #self.plot_loss_separate(epoch,train_losses_ce,train_losses_entropy, val_losses_ce, val_losses_entropy, train_accs, val_accs)
                     
             if True:#val_loss<best_loss:#val_loss<best_loss:
@@ -553,7 +610,19 @@ class Seq2SeqTrainer(nn.Module):
                     if self.gpu_id==0 and (epoch+1)%save_every==0: #only save rank 0 model
                         prGreen(f"Saving checkpoint : val_loss = {val_loss}, val_acc = {val_acc}")
                         #print('save ckp')
-                        self.save_checkpoint(self.trainer_name+".pt") #save ckp as run name and add .pt extension
+                        perfs = {
+                            "train_loss":train_losses,
+                            "train_loss_ce":train_losses_ce,
+                            "train_loss_entropy":train_losses_entropy,
+                            "train_loss_commit":train_losses_commit,
+                            "test_loss":val_losses,
+                            "test_loss_ce":val_losses_ce,
+                            "test_loss_entropy":val_losses_entropy,
+                            "test_loss_commit":val_losses_commit,
+                            "train_acc":train_accs,
+                            "test_acc":val_accs
+                            }
+                        self.save_checkpoint(self.trainer_name+".pt", perfs) #save ckp as run name and add .pt extension
                     
                     # # Synchronize across all ranks
                     # The above code is using the `torch.distributed.barrier()` function to
@@ -570,8 +639,8 @@ class Seq2SeqTrainer(nn.Module):
                     #     self.load_checkpoint(checkpoint_name)
                 
             
-            if self.gpu_id==0: #check rank
-                np.save(f"runs/coupling/eval_{self.trainer_name}.npy",{"train_loss":train_losses,"test_loss":val_losses,"train_acc":train_accs,"test_acc":val_accs},allow_pickle=True)
+            # if self.gpu_id==0: #check rank
+            #     np.save(f"runs/coupling/eval_{self.trainer_name}.npy",{"train_loss":train_losses,"test_loss":val_losses,"train_acc":train_accs,"test_acc":val_accs},allow_pickle=True)
         
         if trial!=None:
             return best_loss,best_codebook_usage
