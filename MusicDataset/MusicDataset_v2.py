@@ -609,7 +609,7 @@ class MusicContainer4dicy2(Dataset):
             duration = None
         self.hop_size = self.track_duration*2/3 if not hop_size else hop_size
         
-        if isinstance(track_path,List):
+        if isinstance(track_path,List): #for guide
             #open each track and combine
             tracks=[]
             ls=[]
@@ -665,7 +665,7 @@ class MusicContainer4dicy2(Dataset):
         
         #chunk track
         self.track_chunks = self.segment_track(self.track,track_duration,self.sampling_rate, strategy=pre_segemntation,all=True)
-        self.native_track_chunks = self.segment_track(self.native_track, self.native_sr, track_duration, strategy=pre_segemntation,all=True)
+        self.native_track_chunks = self.segment_track(self.native_track, track_duration, self.native_sr, strategy=pre_segemntation,all=True)
         
     
     def __len__(self):
@@ -694,12 +694,13 @@ class MusicContainer4dicy2(Dataset):
     def get_native_chunks(self,index):
         #get track
         track = self.native_track_chunks[index]
-        duration = len(track)/self.native_sr
+        #duration = len(track)/self.native_sr
         
         #pad with zeros if track is not track_duration --> raises error in batching
-        if duration<self.track_duration:
-            pad = int((self.track_duration-duration)*self.native_sr)
-            track = np.concatenate([track,np.zeros(pad)])
+        #shouldnt be a problem since we pad at init
+        # if duration<self.track_duration:
+        #     pad = int((self.track_duration-duration)*self.native_sr)
+        #     track = np.concatenate([track,np.zeros(pad)])
         
         #segment track into chunks
         chunks = self.segment_track(track,self.max_duration, self.native_sr, self.segmentation_strategy)
