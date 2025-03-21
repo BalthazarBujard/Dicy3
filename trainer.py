@@ -257,11 +257,11 @@ class Seq2SeqTrainer(nn.Module):
         
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        ax2.legend(lines + lines2, labels + labels2, loc=0)
+        ax2.legend(lines + lines2, labels + labels2, loc="upper left")
 
         
         ax1.set_xlabel("Epochs")
-        ax1.set_ylabel("Cross Entropy")
+        ax1.set_ylabel("Loss")
         ax2.set_ylabel("Accuracy")
         ax2.grid()
         fig.savefig(f"runs/coupling/{name}_{self.trainer_name}.png")

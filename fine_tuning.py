@@ -40,10 +40,10 @@ def main(args, device):
     
     #Adapt only last layers of decisionprediction layer
     #seq2seq.encoder.requires_grad_ = False
-    seq2seq.decision.adapt_output_layer()
-    seq2seq.decision.freeze_last_n_layers(2)
+    #seq2seq.decision.adapt_output_layer()
+    #seq2seq.decision.freeze_last_n_layers(2)
     
-    print(next(seq2seq.encoder.quantizer.parameters()).requires_grad)
+    #print(next(seq2seq.encoder.quantizer.parameters()).requires_grad)
     
     guide_path = args.guide
     target_path = args.target

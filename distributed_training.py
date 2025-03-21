@@ -12,6 +12,8 @@ from trainer import Seq2SeqTrainer
 from MusicDataset.MusicDataset_v2 import MIN_RESOLUTION
 import math
 from pathlib import Path
+import json
+from argparse import Namespace
 
 #global var
 SAMPLING_RATE = 16000 #sampling rate for wav2vec2 bb model. shouldn't be changed !
@@ -133,7 +135,7 @@ def build_ds(args):
     return train_roots,val_roots
 
 # WHEN LAUNCING MULTIPLE DDP MANUALLY MODIFY mastr_port
-def setup(rank, world_size,mastr_port=12355):
+def setup(rank, world_size,mastr_port=12312):
     #mastr_port=torch.randint(12355,12360)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = f'{mastr_port}'
@@ -150,7 +152,41 @@ def cleanup():
 
 def main(rank, world_size, args):
     prGreen(f"Running DDP train on rank {rank}.")
-    setup(rank, world_size)
+    mastr_port = torch.randint(12300,12500,(1,)).item()
+    #print(mastr_port)
+    setup(rank, world_size, mastr_port)
+    
+    run_id = args.run_id
+
+    if args.resume_ckp!='':
+        resume_ckp = Path(args.resume_ckp)
+        print("Reloading Model from ckp :",resume_ckp)
+        seq2seq, params, optim_state_dict = load_model_checkpoint(resume_ckp)
+        try:
+            run_id = params['run_id']
+        except KeyError:
+            run_id = resume_ckp.stem
+        
+        args_path = resume_ckp.parent.joinpath("train_args_"+resume_ckp.stem+".txt")
+        print("Reloading train args from :",args_path)
+        args_f = open(args_path)
+        args_dict = json.load(args_f)
+        
+        #params for continuation to keep
+        args_dict["epochs"]=args.epochs 
+        args_dict["resume_ckp"]= args.resume_ckp
+        run_id += "_continued"
+        args_dict["run_id "]= run_id
+        args = Namespace(**args_dict)
+        print(args)
+
+        #save args dict with _continued suffix for easier continuation
+        with open(f'runs/coupling/train_args_{run_id}.txt', 'w') as f:
+            json.dump(args.__dict__, f, indent=2)
+        
+    else : seq2seq=build_model(args)
+    
+    print(run_id)
     
     train_roots,val_roots=build_ds(args)
     
@@ -162,6 +198,7 @@ def main(rank, world_size, args):
     PRE_SEGMENTATION= args.pre_segmentation #how to segment the tracks in sub-tracks (sliding or uniform expected)
     DIRECTION= args.direction
     
+    #PROBLEME CKP CONTINUATION VIENT VIENT D'ICI SI ON DONNE PAS LES MEMES ARGS
     train_fetcher = build_coupling_ds(train_roots,batch_size,
                                         MAX_TRACK_DURATION,MAX_CHUNK_DURATION,
                                         segmentation_strategy=SEGMENTATION_STRATEGY,
@@ -182,19 +219,6 @@ def main(rank, world_size, args):
                                         direction=DIRECTION,distributed=True)
     val_fetcher.device = rank
     
-    run_id = args.run_id
-
-    if args.resume_ckp!='':
-        print("Reloading Model from ckp :",args.resume_ckp)
-        seq2seq, params, optim_state_dict = load_model_checkpoint(args.resume_ckp)
-        try:
-            run_id = params['run_id']
-        except KeyError:
-            run_id = os.path.basename(args.resume_ckp).split(".pt")[0]
-    
-    else : seq2seq=build_model(args)
-    
-    print(run_id)
     
     lr = args.learning_rate
     lr_bb = lr if args.learning_rate_backbone == -1 else args.learning_rate_backbone
@@ -248,7 +272,7 @@ def main(rank, world_size, args):
                             k = k,
                             grad_accum_steps=grad_accum_steps,
                             codebook_loss_weight=codebook_loss_weight,
-                            chunk_size=args.chunk_duration,
+                            chunk_size=args.chunk_duration, #PROBLEME VIENT D'ICI ON UTILISE CHUNK SIZE DANS TRAINER ET CA ECRASE LA VALEUR AU PROCHAIN CKP
                             track_size=args.track_duration,
                             #resume_epoch=args.resume_epoch,
                             resume_ckp=args.resume_ckp,
@@ -266,10 +290,11 @@ def main(rank, world_size, args):
 
 
 if __name__=='__main__':
-    import json
     from launch_ddp import train_parser
     
     args = train_parser().parse_args()
+    
+    if args.vocab_size == -1 : assert args.resume_ckp != "", "Specify vocab_size if no checkpoint is given"
     
     world_size = torch.cuda.device_count()
     

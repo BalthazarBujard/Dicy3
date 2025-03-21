@@ -176,11 +176,11 @@ def parse_args():
 
 if __name__=='__main__':
     
+    args = parse_args()
+    
     from utils.utils import lock_gpu
     DEVICES,_=lock_gpu()
     DEVICE = DEVICES[0]
-    
-    args = parse_args()
     
     # If a file with checkpoint paths is provided, read it and add to model_ckp
     if args.model_ckps_folder:

@@ -16,11 +16,11 @@ def train_parser():
     parser.add_argument('--dim', type = int, choices=[256,768], default=768)
     parser.add_argument('--freeze_backbone',action='store_true')
     #prRed("TRAINIGN BACKBONE")
-    parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024],required=True) #remove required since ckp reloading doesnt need it
+    parser.add_argument('-vocab','--vocab_size',type=int,choices=[16,32,64,128,256,512,1024,-1],default=-1)
     parser.add_argument("--special_vq", action='store_true')
     parser.add_argument('--learnable_cb',action='store_true')
     parser.add_argument('-restart','--restart_codebook',action='store_true')
-    parser.add_argument('--codebook_loss_weight',type=float,default=0.25) #++ encoding et embeddings vont se rapprocher vite -> risque de collapse
+    parser.add_argument('--codebook_loss_weight',type=float,default=0.) #++ encoding et embeddings vont se rapprocher vite -> risque de collapse
     parser.add_argument('-head','--encoder_head',type=str,choices=['mean','attention'],default='mean')
     parser.add_argument('-condense','--condense_type',choices=['mask','weighed','none'],default='none')
     parser.add_argument('-layers','--transformer_layers',type=int,default=6)
@@ -46,7 +46,7 @@ def train_parser():
     parser.add_argument('--k',type=float,default=1)
     parser.add_argument('--run_id',type=str)
     parser.add_argument('--train_subset',action='store_true') #to do small trainings to find good parameters
-    parser.add_argument('--data',choices=['all','canonne','moises'])
+    parser.add_argument('--data',choices=['all','canonne','moises','None'])
     parser.add_argument('--resume_ckp',default='')
     #parser.add_argument('--resume_epoch',type=int,default=0)
     

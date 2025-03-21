@@ -593,7 +593,7 @@ class MusicContainer4dicy2(Dataset):
     def __init__(self,track_path:Union[Union[str,Path], List[Union[str,Path]]], 
                  track_duration:float, max_duration:float, sampling_rate:float, 
                  segmentation_strategy:str, pre_segemntation:str='uniform',
-                 timestamps=None, hop_size:float=None):
+                 timestamps=None, hop_fraction:float=0.65):
         
         super().__init__()
         self.sampling_rate=sampling_rate
@@ -607,7 +607,10 @@ class MusicContainer4dicy2(Dataset):
         else :
             t0=0
             duration = None
-        self.hop_size = self.track_duration*2/3 if not hop_size else hop_size
+        
+        #hop size has to be a multiple (N) of chunk size for sliding generation
+        N = int(hop_fraction*self.track_duration/self.max_duration)
+        self.hop_size = N*self.max_duration#self.track_duration*2/3 if not hop_size else hop_size
         
         if isinstance(track_path,List): #for guide
             #open each track and combine
@@ -689,7 +692,7 @@ class MusicContainer4dicy2(Dataset):
         
         label = -1 #not used but needed for compatibility
         
-        return chunks, label, slices  
+        return chunks, label#, slices  
     
     def get_native_chunks(self,index):
         #get track

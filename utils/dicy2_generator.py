@@ -43,10 +43,9 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     force_output: bool = False #True  # if no matches are found: output the next event (if True) or output None (if False)
     label_type = ListLabel
     
-    collate_fn = MusicDataCollator(with_slices=True,unifrom_chunks=chunk_segmentation!="onset")
+    collate_fn = MusicDataCollator(unifrom_chunks=chunk_segmentation!="onset")
     memory_loader = DataLoader(memory_ds,batch_size,False,collate_fn=collate_fn)
-    memory_fetcher = Fetcher(memory_loader)
-    memory_fetcher.device=model.device
+    memory_fetcher = Fetcher(memory_loader, model.device)
     
     #generate the whole corpus data from memory chunks
     labels = []
@@ -76,11 +75,15 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
         
         #TODO : OPTIMIZE THIS CODE PART
         #iterate over batch elements
-        for j,(idxs, slices) in enumerate(zip(memory_idx,memory_data.slices)):
-            first = (i==0 and j==0) #first segment
+        for j,idxs in enumerate(memory_idx):
+            first = (i==0 and j==0) #first segment, could be changed with a flag init at first = True and here "if first==True:first=False"
+            
+            slices = np.arange(len(idxs))
             
             #retrieve corresponding memory chunks
             memory_chunks=memory_ds.get_native_chunks(native_chunk_idx) #unprocessed chunks with native sr
+            print("memory chunk and idxs len",len(memory_chunks), len(idxs))
+            print("slices", slices)
             
             if sliding:
                 if not first: #except for first chunk of first batch
@@ -93,7 +96,7 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
                     memory_chunks = memory_chunks[-output_hop_size:] #crop memeory chunks too
             
             print(idxs,slices)
-            corpus_data.extend([(label.item(), last_slice+content.item()) for label,content in zip(idxs,slices)])
+            corpus_data.extend([(label.item(), last_slice+slice) for label,slice in zip(idxs,slices)])
             last_slice = corpus_data[-1][1]+1 #slices only go from 0 to max so we need to update the real slice index basded on ietration
         
             all_memory_chunks.extend(memory_chunks) #append to list of all chunks
@@ -129,7 +132,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
 
     label_type = ListLabel
     
-    collate_fn = MusicDataCollator(with_slices=True,unifrom_chunks=chunk_segmentation!="onset")
+    collate_fn = MusicDataCollator(unifrom_chunks=chunk_segmentation!="onset")
     src_loader = DataLoader(src_ds,batch_size,False,collate_fn=collate_fn)
     src_fetcher = Fetcher(src_loader)
     src_fetcher.device = model.device
@@ -158,7 +161,7 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             raise RuntimeError("If hop size is not a multiple of chunk size there wont be an integer number of chunks equivalent to hop_size...")
         
         output_hop_size=int(output_hop_size)
-        print(src_ds.hop_size,output_hop_size)
+        print(f"sliding window hop duration {src_ds.hop_size}s -> output hop size = {output_hop_size}")
     
     #now we iterate over all source chunks (sub-tracks) to create the whole response to input
     for i in range(len(src_fetcher)):
@@ -169,14 +172,6 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
         encoded_src, src_idx, src_pad_mask = model.encode(src_data.src, src_data.src_padding_masks) 
         
         if with_coupling: #if we want to generate a more complex response 
-            
-            # if tgt_gts != None :
-            #     tgt_gt = torch.tensor(tgt_gts[i],device = model.device) #(B,T)
-            #     tgt_gt = torch.cat([torch.tensor([sos],device=model.device).expand(tgt_gt.size(0),1),
-            #                         tgt_gt,
-            #                         torch.tensor([eos],device=model.device).expand(tgt_gt.size(0),1)],dim=1)
-                
-            # else : tgt_gt = None
             
             #TODO : ADD ARGUMENT TO USE LAST PREDICTION AS BEGINNING OF TGT ?
             tgt_idx = model.coupling(encoded_src, 
@@ -192,12 +187,6 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
             #print("GT:",tgt_gt)
         
         else : tgt_idx = src_idx #for expermient purposes (identity matching with latent descriptors)
-        
-        # #compute accuracy of predicted sequence
-        # acc = -1
-        # if tgt_gt!=None:
-        #     acc = compute_accuracy(tgt_idx.reshape(-1),tgt_gt.reshape(-1),pad_idx=model.special_tokens_idx['pad'])
-        # accuracy.append(acc)
         
         #append predictions for later accuracy calculation
         preds.extend(tgt_idx.reshape(-1).numpy(force=True))
