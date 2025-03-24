@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Union, List, Optional
 from librosa import load
 from munch import Munch
-import glob
+import csv
 import argparse
 from generate import generate_example
 import datetime
@@ -200,12 +200,14 @@ def evaluate_model(model : Seq2SeqBase, eval_fetcher : Fetcher, k: int, device :
     #torch.cuda.empty_cache()
     #del src, tgt, src_pad_mask, tgt_pad_mask, src_mask_indices, logits, tgt_idx, tgt_out, preds
     
-    return Munch(accuracy={"mean":acc,"std":acc_std},
+    perfs = Munch(accuracy={"mean":acc,"std":acc_std},
                  diversity={"mean":diversity,"std":diversity_std},
                  perpleity={"mean":perplexity,"std":perplexity_std},
                  codebook_usage = {"mean":codebook_usage,"std":codebook_usage_std},
                  topK_sim = {"mean":cosine_sim,"std":cosine_sim_std},
                  WER = {"mean":wer, "std":wer_std})
+    
+    return perfs
 
 def generate_eval_examples(tracks_list : List[List[Path]], 
                            model : Seq2SeqCoupling, 
@@ -253,11 +255,14 @@ def generate_eval_examples(tracks_list : List[List[Path]],
         
         bar.update(1)
         
-    
-def save_to_file(data : dict, file : Path):
-    with open(file,'a') as f:
+   
+def save_to_file(data: dict, file: Path):
+    with open(file, 'a', newline='') as f:  # Open in append mode
+        writer = csv.writer(f)
         for key, value in data.items():
-            f.write(f'{key}:{value}\n')
+            if type(value)==dict:
+                writer.writerow([key, value.values()])  # Append each key-value pair
+            else : writer.writerow([key, value])
 
 def parse_args():
         
@@ -268,7 +273,7 @@ def parse_args():
     parser.add_argument("--model_ckps_folder",type=Path,default=None)
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
     parser.add_argument("--split", choices = ['val','val_subset','test'])
-    parser.add_argument('--k',type=float, default=5)
+    parser.add_argument('--k',type=float, default=1)
     #if already generated audio samples
     parser.add_argument("--generate",action='store_true')
     parser.add_argument("--with_coupling",action='store_true')
@@ -341,7 +346,7 @@ def main():
         
         #load model for generation or model eval
         if 'model' in args.task or 'symbolic_generation' in args.task or args.generate:
-            model,params,_ = load_model_checkpoint(model_ckp,data=args.data)
+            model,params,_ = load_model_checkpoint(model_ckp)
             model.has_masking=False #during evaluation model doesnt mask time indices
             model.to(device)
             
@@ -370,13 +375,14 @@ def main():
         save_dir = eval_dir.joinpath(f'{model_ckp.stem}/{args.split}/{args.data}/{k_fname}')
         
         os.makedirs(save_dir,exist_ok=True)
-        eval_file = save_dir.joinpath("eval.txt") #os.path.join(save_dir,"eval.txt")
+        eval_file = save_dir.joinpath("eval.csv") #save_dir.joinpath("eval.txt")
         
         #depends on dataset and split
         dataset = 'moisesdb_v2' if args.data == 'moises' else 'BasesDeDonnees'
         
         #save arguments/metadata in file
-        save_to_file({"":"-"*50,'date':datetime.datetime.now()},eval_file)
+        t=datetime.datetime.now()
+        save_to_file({"":"-"*50,'date':t},eval_file)
         
         #generate audio from corresponding data folder
         if args.generate:
@@ -454,8 +460,10 @@ def main():
             output = evaluate_model(model,eval_fetcher,k,device)
             
             #save output to file
-            #save_to_file({'k':k},eval_file)
             save_to_file(output,eval_file)
+            
+            #save to npy file
+            np.save(save_dir.joinpath(f"model_eval_{t}"), output)
         
         if 'symbolic_generation' in args.task:
             prGreen("Evaluating symbolic generation...")
@@ -485,6 +493,9 @@ def main():
             #save output to file
             #save_to_file({'k':k},eval_file)
             save_to_file(output,eval_file)
+            
+            #save to npy file
+            np.save(save_dir.joinpath(f"symbolic_gen_eval_{t}"), output)
         
         if 'quality' in args.task :
             prGreen("Evaluating audio quality...")
@@ -514,6 +525,9 @@ def main():
             print("audio quality =",score)
             #save to file
             save_to_file({'audio_quality':score},eval_file)
+            
+            #save to npy file
+            np.save(save_dir.joinpath(f"audio_quality_eval_{t}"), output)
             
         if 'apa' in args.task :
             prGreen("Evaluating APA...")
@@ -547,6 +561,9 @@ def main():
             print("APA =", score,"\nFADs :",fads)
             #save to file
             save_to_file({'APA':score,"FADs":fads},eval_file)
+            
+            #save to npy file
+            np.save(save_dir.joinpath(f"model_eval_{t}"), {'APA':score,"FADs":fads})
         
         if 'similarity' in args.task :
             prGreen("Evaluating Music Similarity...")
@@ -601,7 +618,7 @@ def main():
             save_to_file({"music_similarity (mean, std, median)" : [round(mean_sim,2), round(std_sim,2), round(median_sim,2)]},eval_file)
             
             #save similarities to plot boxes if necessary
-            sims_path = save_dir.joinpath(f"music_similarities_{tgt_folder.name}_{datetime.datetime.now()}.npy")
+            sims_path = save_dir.joinpath(f"music_similarities_{tgt_folder.name}_{t}.npy")
             np.save(sims_path,sims)
         
         #compute consecutive chunk indexes
@@ -626,7 +643,7 @@ def main():
             max_lengths_histogram = np.bincount(max_lengths)
             
             #save histogram for plot
-            consecutive_idxs_stats_path = save_dir.joinpath(f"consecutive_idxs_stats_{datetime.datetime.now()}.npy")
+            consecutive_idxs_stats_path = save_dir.joinpath(f"consecutive_idxs_stats_{t}.npy")
             np.save(consecutive_idxs_stats_path,{"lengths_histogram":lengths_histogram,"max_lengths_histogram":max_lengths_histogram,"gt_lengths":gt_lengths})
             
             

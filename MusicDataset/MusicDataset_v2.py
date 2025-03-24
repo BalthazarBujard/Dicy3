@@ -433,8 +433,6 @@ class MusicContainer(Dataset):
         return distribution 
 
 #special container that does chunking per track and not on whole ds
-# TODO : IMPLEMENT A WAY TO OPTIMIZE THIS STRUCTURE !!!!
-# TODO : apply sliding window segmentation --> done in MsuicContainer
 class MusicContainerPostChunk(MusicContainer):
     def __init__(self, root:Union[Union[str,Path], List[Union[str,Path]]], track_duration:float, max_duration:float, sampling_rate:float, 
                  segmentation_strategy:str, pre_segmentation = 'sliding', non_empty=False, ignore_instrument=[], max_time:float=600.0, verbose:float=False):
@@ -593,7 +591,7 @@ class MusicContainer4dicy2(Dataset):
     def __init__(self,track_path:Union[Union[str,Path], List[Union[str,Path]]], 
                  track_duration:float, max_duration:float, sampling_rate:float, 
                  segmentation_strategy:str, pre_segemntation:str='uniform',
-                 timestamps=None, hop_fraction:float=0.65):
+                 timestamps=None, hop_fraction:float=0.70):
         
         super().__init__()
         self.sampling_rate=sampling_rate

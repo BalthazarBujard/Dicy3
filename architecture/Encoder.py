@@ -53,6 +53,21 @@ class Backbone(nn.Module):
     def device(self):
         return next(self.parameters()).device
     
+    @property 
+    def max_duration(self):
+        if self.type=="w2v":
+            return 15.0 #max w2v sample length for encoding
+        else :
+            raise NotImplementedError()
+    
+    @property
+    def sampling_rate(self):
+        if self.type=="w2v":
+            return 16000
+        else : 
+            raise NotImplementedError()
+        
+    
     def freeze(self):
         for p in self.backbone.parameters():
             p.requires_grad = False
@@ -239,7 +254,6 @@ class LocalEncoder(nn.Module):
         self.quantizer = quantizer
         self.dim = quantizer.dim       
         
-        #self.out_proj=nn.Linear(embed_dim,self.dim) if self.dim != embed_dim else nn.Identity()
     
     @property
     def device(self):
@@ -389,7 +403,30 @@ class LocalEncoder(nn.Module):
         if x.ndim!=3:
             raise ValueError(f"The input tensor x has not the expected shape of (batch,chunks,samples) but has shape {x.shape}")
         
-        B,chunks,max_samples = x.shape
+        B,chunks,max_samples = x.shape #original_sahpe
+        
+        # if chunks*max_samples/self.encoder.sampling_rate>self.encoder.max_duration + 1: #if track duration too big for encoder
+        #     print(chunks*max_samples/self.encoder.sampling_rate)
+        #     print("Reshaping tracks to match max input length of backbone")
+        #     max_duration = self.encoder.max_duration
+        #     sr = self.encoder.sampling_rate
+            
+        #     chunks_ = max_duration*sr/max_samples #chunks'
+
+        #     if not chunks_.is_integer(): raise RuntimeError("max_duration is not divisible by chunk duration...")
+
+        #     chunks_ = int(chunks_)
+        #     #print(chunks, chunks_)
+
+        #     B_ = B*chunks/chunks_
+        #     #print(B,B_)
+
+        #     if not B_.is_integer(): raise RuntimeError("track_duration is not divisible by max_duration...")
+
+        #     B_ = int(B_)
+
+        #     x = x.reshape(B_,chunks_,max_samples) #reshape as (B',chunks',samples)
+        #     padding_mask = padding_mask.reshape(B_,chunks_,max_samples) #same
         
         #encode chunks   
         x, padding_mask = self.encode(x, padding_mask) #(B*chunks,L_enc,dim)

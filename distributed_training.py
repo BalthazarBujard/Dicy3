@@ -175,7 +175,8 @@ def main(rank, world_size, args):
         #params for continuation to keep
         args_dict["epochs"]=args.epochs 
         args_dict["resume_ckp"]= args.resume_ckp
-        run_id += "_continued"
+        if not run_id.endswith("_continued"):
+            run_id += "_continued"
         args_dict["run_id "]= run_id
         args = Namespace(**args_dict)
         print(args)
