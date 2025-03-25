@@ -166,7 +166,7 @@ def load_trained_backbone_from_classifier(pretrained_file, backbone_checkpoint="
     )
         
     return adapted_model, classifier
-#%%
+
 def random_sample(topK_idx : torch.Tensor):
     N,k = topK_idx.size()
     random_idx = torch.randint(0,k,size=(N,1),device=topK_idx.device)
@@ -174,30 +174,41 @@ def random_sample(topK_idx : torch.Tensor):
     
     return sampled_idx
 
+def sample(topK_probs : torch.Tensor, topK_idx : torch.Tensor):
+    #topK_probs (B,k), topK_idx (B,k)
+    sampled_idx = torch.multinomial(topK_probs,1) #sample one element from each row in probs, (B,1)
+    print(sampled_idx)
+    sampled_idx = topK_idx.gather(1,sampled_idx) #retrieve the corresponding idxs from the sampling of the probs
+    print(topK_probs,sampled_idx)
+    return sampled_idx
+
 def topK_search(k, logits : torch.Tensor, targets : Optional[torch.Tensor]=None):
     B,C = logits.size()
-    topK_idx = torch.topk(logits,k,dim=-1)[1] #(B,k)
-    
+    topK_logits,topK_idx = torch.topk(logits,k,dim=-1) #(B,k),(B,k)
+    topK_probs = topK_logits.softmax(-1) #apply softmax to create distribution accross topK samples
     if targets != None :
         #find the corresct value in the topK
         #if there isnt then random choice
         sampled_idx=torch.empty(B, dtype=torch.long, device = logits.device) # init empty tenosr
-        for i,(topK_sample,tgt) in enumerate(zip(topK_idx,targets)):
-            
-            # if tgt in topK_sample:
-            #     sampled_idx[i]=tgt
+        for i,(topK_sample, topK_prob,tgt) in enumerate(zip(topK_idx, topK_probs, targets)):
             
             idxs = torch.isin(topK_sample,tgt) #is there any occurence of tgt (set_size,) in topK_idxs (K,)
             if any(idxs):
-                sampled_idx[i] = random_sample(topK_sample[idxs].unsqueeze(0)) #if so pick the one with highest probability
+                #sampled_idx[i] = random_sample(topK_sample[idxs].unsqueeze(0)) #if so pick the one with highest probability
+                sampled_idx[i] = sample(topK_prob[idxs].unsqueeze(0),topK_sample[idxs].unsqueeze(0))
             
             else :
                 #random sample from that list
-                sampled_idx[i] = random_sample(topK_sample.unsqueeze(0)) #fct expects (N,k)-->(1,k)
+                #sampled_idx[i] = random_sample(topK_sample.unsqueeze(0)) #fct expects (N,k)-->(1,k)
+                sampled_idx[i] = sample(topK_prob.unsqueeze(0),topK_sample.unsqueeze(0))
+            
     
     else :
         #return random sample among those values
-        sampled_idx = random_sample(topK_idx)
+        #sampled_idx = random_sample(topK_idx)
+        
+        #return samples following probability distribution
+        sampled_idx = sample(topK_probs,topK_idx)
     
     return sampled_idx
 
@@ -229,26 +240,33 @@ def topP_search(p: float, logits : torch.Tensor, targets : Optional[torch.Tensor
     
     #assign topP indices, if no elemnt satisfies p value -> return first
     topP_idx = [indices[i,:idxs[-1]+1] for i,idxs in enumerate(top_p_indices)] #(B,inhomogenous)
+    #print("TopP idx:",topP_idx)
+    topP_probs = [logits[i][idx].softmax(-1) for i,idx in enumerate(topP_idx)] #(B, inhomogenous)
+    #print("TopP probs:",topP_probs)
     
     if targets != None :
         #find the corresct value in the topK
         #if there isnt then random choice
         sampled_idx=torch.empty(len(topP_idx), dtype=torch.long, device = logits.device) # init empty tenosr
-        for i,(topP_sample,tgt) in enumerate(zip(topP_idx,targets)):
+        for i,(topP_sample, topP_prob, tgt) in enumerate(zip(topP_idx, topP_probs, targets)):
             
             # if tgt in topP_sample:
             #     sampled_idx[i]=tgt
             idxs = torch.isin(topP_sample,tgt) #is there any occurence of tgt (set_size,) in topP_idxs (>=1,)
             if any(idxs):
-                sampled_idx[i] = random_sample(topP_sample[idxs].unsqueeze(0)) #if so pick the one with highest probability
-            
+                #sampled_idx[i] = random_sample(topP_sample[idxs].unsqueeze(0)) #if so pick the one with highest probability
+                sampled_idx[i] = sample(topP_prob[idxs].unsqueeze(0),topP_sample[idxs].unsqueeze(0))
             else :
                 #random sample from that list
-                sampled_idx[i] = random_sample(topP_sample.unsqueeze(0)) #fct expects (N,k)-->(1,k)
+                #sampled_idx[i] = random_sample(topP_sample.unsqueeze(0)) #fct expects (N,k)-->(1,k)
+                sampled_idx[i] = sample(topP_prob.unsqueeze(0),topP_sample.unsqueeze(0))
+            
     
     else :
         #return random sample among those values
-        sampled_idx = torch.tensor([random_sample(topP_sample.unsqueeze(0)) for topP_sample in topP_idx], device=logits.device)
+        #sampled_idx = torch.tensor([random_sample(topP_sample.unsqueeze(0)) for topP_sample in topP_idx], device=logits.device)
+        sampled_idx = torch.tensor([sample(topP_prob.unsqueeze(0),topP_sample.unsqueeze(0)) for topP_prob,topP_sample in zip(topP_probs,topP_idx)], device=logits.device)
+    
     
     return sampled_idx
 
