@@ -608,7 +608,7 @@ class MusicContainer4dicy2(Dataset):
         
         #hop size has to be a multiple (N) of chunk size for sliding generation
         N = int(hop_fraction*self.track_duration/self.max_duration)
-        self.hop_size = N*self.max_duration#self.track_duration*2/3 if not hop_size else hop_size
+        self.hop_size = N*self.max_duration #self.track_duration*2/3 if not hop_size else hop_size
         
         if isinstance(track_path,List): #for guide
             #open each track and combine

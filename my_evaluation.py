@@ -261,7 +261,7 @@ def save_to_file(data: dict, file: Path):
         writer = csv.writer(f)
         for key, value in data.items():
             if type(value)==dict:
-                writer.writerow([key, value.values()])  # Append each key-value pair
+                writer.writerow([key, list(value.values())])  # Append each key-value pair
             else : writer.writerow([key, value])
 
 def parse_args():

@@ -165,6 +165,7 @@ def parse_args():
     parser.add_argument("--from_subset", action = 'store_true')
     parser.add_argument('--memory', type=Path)
     parser.add_argument('--source',nargs='*', type=Path)
+    parser.add_argument("--root_folder",type=Path)
     parser.add_argument("--save_dir", type=Path)
     parser.add_argument("--mix_channels",type=int,choices=[1,2],default=2)
     parser.add_argument("-accuracy","--compute_accuracy",action = "store_true")
@@ -177,6 +178,7 @@ def parse_args():
 if __name__=='__main__':
     
     args = parse_args()
+    
     
     from utils.utils import lock_gpu
     DEVICES,_=lock_gpu()
@@ -213,9 +215,74 @@ if __name__=='__main__':
         k=args.k
         if k>=1:
             k=int(k)
-            
-        if args.memory!=None and args.source!=None:
-            generate_example(model,args.memory,args.source, track_duration, chunk_duration, segmentation, pre_segmentation,
+        
+        #used for generating 'consignes de generation' where there are track folders with "Guide..." and "Mem..." naming structure
+        if args.root_folder is not None:
+            modes = [mode for mode in list(args.root_folder.iterdir()) if mode.name!=".DS_Store"]
+            print(modes)
+            for mode_dir in modes:
+                save_dir_mode = save_dir.joinpath(mode_dir.name)
+                #find all tracks in "relationship mode" folder
+                track_folders = list(mode_dir.iterdir())
+                pairs=[]
+                pairs_exo=[]
+                tracks = []
+                for track in track_folders:
+                    mem = list(track.glob("Mem_*.wav"))
+                    guide = list(track.glob("Guide_*.wav"))
+                    
+                    if len(mem)>0 and len(guide)>0:
+                        # tracks.append(track.name)
+                        # pairs.append([mem[0], guide[0]])
+                        memory = mem[0]
+                        source = guide[0]
+                        save_dir_orig = save_dir_mode.joinpath(track.name)
+                        
+                        print(save_dir_orig,track,memory,source)
+                        
+                        generate_example(model,memory, [source], track_duration, chunk_duration, segmentation, pre_segmentation,
+                                    args.with_coupling,args.remove,k,args.decoding_type, args.temperature, args.force_coupling,
+                                    args.fade_time,
+                                    save_dir_orig,
+                                    args.smaller,
+                                    args.batch_size,
+                                    compute_accuracy=args.compute_accuracy,
+                                    max_duration=args.max_duration,
+                                    device=DEVICE,
+                                    mix_channels=args.mix_channels, 
+                                    entropy_weight=args.entropy_weight,
+                                    save_concat_args=args.save_concat_args,
+                                    easy_name = args.easy_name)
+                    
+                    mem2 = list(track.glob("Mem2_*.wav"))
+                    
+                    if len(mem2)>0 and len(guide)>0:
+                        memory = mem2[0]
+                        source = guide[0]
+                        save_dir_exo = save_dir_mode.joinpath(track.name+"_exo")
+                        
+                        print(save_dir_exo,track,memory,source)
+                        
+                        generate_example(model,memory, [source], track_duration, chunk_duration, segmentation, pre_segmentation,
+                                    args.with_coupling,args.remove,k,args.decoding_type, args.temperature, args.force_coupling,
+                                    args.fade_time,
+                                    save_dir_exo,
+                                    args.smaller,
+                                    args.batch_size,
+                                    compute_accuracy=args.compute_accuracy,
+                                    max_duration=args.max_duration,
+                                    device=DEVICE,
+                                    mix_channels=args.mix_channels, 
+                                    entropy_weight=args.entropy_weight,
+                                    save_concat_args=args.save_concat_args,
+                                    easy_name = args.easy_name)
+                    
+                
+        
+        memory = args.memory
+        source = args.source   
+        if memory!=None and source!=None:
+            generate_example(model,memory, source, track_duration, chunk_duration, segmentation, pre_segmentation,
                             args.with_coupling,args.remove,k,args.decoding_type, args.temperature, args.force_coupling,
                             args.fade_time,
                             save_dir,
@@ -228,10 +295,10 @@ if __name__=='__main__':
                             entropy_weight=args.entropy_weight,
                             save_concat_args=args.save_concat_args,
                             easy_name = args.easy_name)
-        
+            
         elif args.data!=None:
             generate_examples(model, chunk_duration, track_duration, segmentation, pre_segmentation,
-                              args.with_coupling,args.remove,
+                                args.with_coupling,args.remove,
                             k, args.decoding_type, args.temperature, args.force_coupling,
                             fade_time=args.fade_time,
                             num_examples=args.num_examples,data=args.data,save_dir=save_dir, 
@@ -246,4 +313,4 @@ if __name__=='__main__':
                             easy_name = args.easy_name)
         
             
-        else : raise ValueError("Either specify 'data' or give a source and memory path")
+        #else : raise ValueError("Either specify 'data' or give a source and memory path")

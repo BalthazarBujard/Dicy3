@@ -58,9 +58,9 @@ def generate_memory_corpus(memory_ds : MusicContainer4dicy2, model : Seq2SeqCoup
     
     if sliding:
         output_hop_size = memory_ds.hop_size/memory_ds.max_duration #the equivalent hop size in chunks
-        
-        if not output_hop_size.is_integer():
-            raise RuntimeError("If hop size is not a multiple of chunk size there wont be an integer number of chunks equivalent to hop_size...")
+        # print(output_hop_size,memory_ds.hop_size,memory_ds.max_duration)
+        # if not output_hop_size.is_integer():
+        #     raise RuntimeError("If hop size is not a multiple of chunk size there wont be an integer number of chunks equivalent to hop_size...")
         
         output_hop_size=int(output_hop_size)
         print(memory_ds.hop_size,output_hop_size)
@@ -157,8 +157,9 @@ def generate_response(src_ds : MusicContainer4dicy2, model : Seq2SeqCoupling,
     if sliding:
         output_hop_size = src_ds.hop_size/src_ds.max_duration #the equivalent hop size in chunks
         
-        if not output_hop_size.is_integer():
-            raise RuntimeError("If hop size is not a multiple of chunk size there wont be an integer number of chunks equivalent to hop_size...")
+        # hop size manually handled to be an integer. floating point resolution raises an error
+        # if not output_hop_size.is_integer():
+        #     raise RuntimeError("If hop size is not a multiple of chunk size there wont be an integer number of chunks equivalent to hop_size...")
         
         output_hop_size=int(output_hop_size)
         print(f"sliding window hop duration {src_ds.hop_size}s -> output hop size = {output_hop_size}")
@@ -464,6 +465,11 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
     if compute_accuracy :
         accuracy = compute_acc(np.array(preds), np.array(labels), model.special_tokens_idx['pad'].item())
     
+    gt_set=set(labels)
+    gt_set_proportion = len(gt_set)/model.vocab_size   
+    
+    #padding signals
+    
     pad = len(response)-len(source)
     if pad > 0 : #response > source
         source = np.concatenate([source,np.zeros(pad)])
@@ -565,7 +571,7 @@ def generate(memory_path: Path, src_path:Union[Path,List[Path]], model:Union[Seq
         
         write_info(model,memory_path, src_path, mix_name, idx, model.name, k, with_coupling, 
                    remove, accuracy, mean_len, median_len, max_len, entropy, w_size=max_chunk_duration,save_dir=save_dir, 
-                   decoding_type=decoding_type, force_coupling=force_coupling, temperature=temperature,entropy_weight=entropy_weight)
+                   decoding_type=decoding_type, force_coupling=force_coupling, temperature=temperature,entropy_weight=entropy_weight,gt_set_portion=gt_set_proportion)
     
     return Munch(memory = memory,
                  source = source,
@@ -615,7 +621,7 @@ def save_file(dir, folder, fname, data, extension, orig_rate, tgt_rate, make_uni
 
 def write_info(model: Seq2SeqBase, memory_path, source_paths, mix_name, idx, model_name, top_k, with_coupling, remove,
                accuracy, mean_len, median_len, max_len, entropy, 
-               w_size, save_dir, decoding_type, force_coupling, temperature, entropy_weight):
+               w_size, save_dir, decoding_type, force_coupling, temperature, entropy_weight,gt_set_portion):
     # Ensure the info directory exists
     info_path = f"{save_dir}/info.txt"
     os.makedirs(os.path.dirname(info_path), exist_ok=True)
@@ -631,10 +637,11 @@ def write_info(model: Seq2SeqBase, memory_path, source_paths, mix_name, idx, mod
     + "\n".join(f"\t - {path}" for path in source_paths) + "\n"
     f"\tModel : {model_name}\n"
     f"\tParams :\n"
-    f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s], top-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, force_coupling = {force_coupling}, temperature = {temperature}, entropy_weight = {entropy_weight}\n"
+    f"\t\tvocab_size = {model.codebook_size}, segmentation = {model.segmentation}, w_size = {w_size}[s]\n"
+    f"\t\ttop-K = {top_k}, with_coupling = {with_coupling}, remove = {remove}, decoding = {decoding_type}, force_coupling = {force_coupling}, temperature = {temperature}, entropy_weight = {entropy_weight}\n"
 
     f"\tAnalysis :\n"
-    f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, max_len = {max_len}, entropy = {entropy:.2f} [Bits]\n\n"
+    f"\t\taccuracy = {accuracy*100:.2f}%, mean_len = {mean_len:.2f}, median_len = {median_len:.2f}, max_len = {max_len}, entropy = {entropy:.2f} [Bits], gt_set_portion = {gt_set_portion*100:.2f}%\n\n"
     )
     
     # Open the file in append mode and write the content
