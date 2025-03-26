@@ -154,7 +154,8 @@ def parse_args():
     parser.add_argument("-decoding","--decoding_type", type = str, choices=['greedy','beam'], default = "greedy")
     parser.add_argument("--temperature", type = float, default=1.)
     parser.add_argument("--entropy_weight",type=float,default=0.)
-    parser.add_argument("--k",type=float,default=5)
+    parser.add_argument("--k",type=float,default=0.8)
+    parser.add_argument("--k_percent_vocab",action="store_true")
     parser.add_argument("--force_coupling", action = 'store_true')
     parser.add_argument('--fade_time',type=float,default=0.05)
     parser.add_argument("--sliding", action = "store_true")
@@ -215,6 +216,8 @@ if __name__=='__main__':
         k=args.k
         if k>=1:
             k=int(k)
+        elif args.k_percent_vocab:
+            k = round(k*model.vocab_size)
         
         #used for generating 'consignes de generation' where there are track folders with "Guide..." and "Mem..." naming structure
         if args.root_folder is not None:

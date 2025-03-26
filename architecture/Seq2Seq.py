@@ -285,9 +285,7 @@ class Seq2SeqBase(nn.Module):
         
         if gt_set != None:
             if gt_set.ndim < 2 : #1D tensor
-                gt_set = gt_set.view(1,-1).repeat(B,1) # (B, set size)
-        
-        
+                gt_set = gt_set.view(1,-1).repeat(B,1) # (B, set size)                
         #init tgt as SOS
         tgt = self.special_token_embeddings(self.sos).unsqueeze(0).expand(B,1,-1) #(B,1,D)
         tgt_idx = torch.full((B,1),fill_value=self.special_tokens_idx["sos"],device=self.device) #(B,1)

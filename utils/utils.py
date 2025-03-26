@@ -177,9 +177,9 @@ def random_sample(topK_idx : torch.Tensor):
 def sample(topK_probs : torch.Tensor, topK_idx : torch.Tensor):
     #topK_probs (B,k), topK_idx (B,k)
     sampled_idx = torch.multinomial(topK_probs,1) #sample one element from each row in probs, (B,1)
-    print(sampled_idx)
+    #print(sampled_idx)
     sampled_idx = topK_idx.gather(1,sampled_idx) #retrieve the corresponding idxs from the sampling of the probs
-    print(topK_probs,sampled_idx)
+    #print(topK_probs,sampled_idx)
     return sampled_idx
 
 def topK_search(k, logits : torch.Tensor, targets : Optional[torch.Tensor]=None):

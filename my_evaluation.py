@@ -261,7 +261,7 @@ def save_to_file(data: dict, file: Path):
         writer = csv.writer(f)
         for key, value in data.items():
             if type(value)==dict:
-                writer.writerow([key, list(value.values())])  # Append each key-value pair
+                writer.writerow([key]+ [(k,v) for k,v in value.items()])  # Append each key-value pair
             else : writer.writerow([key, value])
 
 def parse_args():
@@ -274,6 +274,7 @@ def parse_args():
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
     parser.add_argument("--split", choices = ['val','val_subset','test'])
     parser.add_argument('--k',type=float, default=1)
+    parser.add_argument("--k_percent_vocab",action="store_true")
     #if already generated audio samples
     parser.add_argument("--generate",action='store_true')
     parser.add_argument("--with_coupling",action='store_true')
@@ -285,7 +286,7 @@ def parse_args():
     parser.add_argument("--smaller",action='store_true')
     parser.add_argument("--max_duration",type=float,default=None)
     parser.add_argument("--crossfade_time",type=float,default=0.05)
-    parser.add_argument("--apa_emb",type=str,choices=["CLAP","L-CLAP"], default = "CLAP")
+    parser.add_argument("--apa_emb",type=str,choices=["CLAP","L-CLAP"], default = "L-CLAP")
     parser.add_argument("--fad_inf",action="store_true")
     #here you can specify "memory" or "original" for baseline evaluation
     parser.add_argument("--quality_tgt_folder",default=None, type = Path, help="target folder ofr generated samples to evaluate audio quality of the model") 
@@ -293,6 +294,7 @@ def parse_args():
     parser.add_argument("--similarity_tgt_folder",default=None, type = Path, help="target folder to evaluate music similarity against groudn truth folder. Default is response folder")
     parser.add_argument("--similarity_gt_folder",default=None, type = Path, help="ground truth folder to evaluate music similarity. Default is the memory folder of generated tracks.")
     parser.add_argument("--root_folder", default = None, type = Path, help="root folder path")
+    
     args = parser.parse_args()
     
     del parser 
@@ -303,7 +305,7 @@ def parse_args():
 def main():
     args = parse_args()
     
-    if "similarity" not in args.task:
+    if args.task!=["similarity"]:
         from utils.utils import lock_gpu 
         device = lock_gpu()[0][0]
     else : device = None
@@ -359,7 +361,8 @@ def main():
                 k = int(args.k)
             else : 
                 k = args.k #total probability
-                #k = round(args.k*model.codebook_size) #percentage of vocabulary size
+                if args.k_percent_vocab :
+                    k = round(args.k*model.vocab_size) #percentage of vocabulary size
         
         
         path=os.path.abspath(__file__)
@@ -563,7 +566,7 @@ def main():
             save_to_file({'APA':score,"FADs":fads},eval_file)
             
             #save to npy file
-            np.save(save_dir.joinpath(f"model_eval_{t}"), {'APA':score,"FADs":fads})
+            np.save(save_dir.joinpath(f"APA_{args.apa_emb}_{t}"), {'APA':score,"FADs":fads})
         
         if 'similarity' in args.task :
             prGreen("Evaluating Music Similarity...")
