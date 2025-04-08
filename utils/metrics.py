@@ -39,6 +39,61 @@ def compute_accuracy(pred_sequence, gt_sequence, pad_idx):
     acc = correct/total
     return acc
 
+def find_longest_prefix(pred, gt):
+    counts=[]
+    count = 0
+    while min(len(pred),len(gt))>0:
+        if count<min(len(pred),len(gt)) and pred[count]==gt[count]:
+            count+=1
+        else :
+            counts.append(count)
+            #print(count)
+            count=max(count,1)
+            pred, gt = pred[count:],gt[count:]
+            #print(pred)
+            #print(gt)
+            count=0
+    return np.array(counts)
+
+def compute_prefixes_per_position(pred, gt):
+    seq_len = len(pred)
+    longest_prefix = find_longest_prefix(pred,gt)
+    
+    prefix_len_per_position = np.zeros(seq_len,dtype=int)
+    idx = 0
+    for p_len in longest_prefix:
+        prefix_len_per_position[idx]=p_len
+        while p_len>1:
+            idx+=1 #increase position counter
+            p_len-=1 #decrease prefix_len
+            prefix_len_per_position[idx]=p_len
+        idx+=1
+
+    return prefix_len_per_position
+
+def compute_LCP_stats(preds:np.ndarray,gts:np.ndarray):
+    prefixes_per_pos = np.empty_like(preds,dtype=int)
+    for i,(p,g) in enumerate(zip(preds,gts)):
+        prefix_per_pos = compute_prefixes_per_position(p, g)
+        prefixes_per_pos[i]=prefix_per_pos
+
+    mean_per_pos = np.mean(prefixes_per_pos,axis=0)
+    std_per_pos = np.std(prefixes_per_pos,axis=0)
+    
+    return mean_per_pos, std_per_pos, prefixes_per_pos
+
+def compute_LCP_histogram(preds : np.array, gts:np.array):
+    bincounts=[]
+    for p,g in zip(preds,gts):
+        count = find_longest_prefix(p,g)
+        bincount = np.bincount(count)
+        bincounts.append(bincount)
+
+    max_len=len(max(bincounts,key=lambda x : len(x))) #find max len in bincounts
+    bincounts = np.sum([np.concatenate([b,np.zeros(max_len-len(b))]) for b in bincounts],axis=0) # pad other bincounts with zeros
+    return bincounts
+
+
 def compute_entropy(input : torch.Tensor, min_length : int) -> torch.Tensor:
     counts = torch.bincount(input=input,minlength=min_length)
     probs = counts/torch.sum(counts)

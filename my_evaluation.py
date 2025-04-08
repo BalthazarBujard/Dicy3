@@ -4,7 +4,7 @@ import torch
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from architecture.Model import load_model_checkpoint
 from MusicDataset.MusicDataset_v2 import Fetcher
-from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality, evaluate_similarity, compute_consecutive_lengths, compute_WER
+from utils.metrics import compute_accuracy,compute_entropy,evaluate_APA,evaluate_audio_quality, evaluate_similarity, compute_consecutive_lengths, compute_WER, compute_LCP_stats
 from utils.utils import predict_topK_P,prGreen,build_coupling_ds, extract_memory_path,prYellow, find_non_empty
 from utils.coupling_ds_generator import extract_all_groups
 from top_k_validity import compute_similarity
@@ -36,9 +36,11 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
     wers = []
     wer, wer_std = 0,0
     
+    preds_, gts = [], [] #for LCP
+    
     eos_idx = model.special_tokens_idx['eos'].to(model.device)
     
-    runs = 3
+    runs = 1 #perform multiple runs since stochastic sampling during prediction
     
     with torch.no_grad():
         for n in range(runs):
@@ -61,13 +63,24 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
                                                         gt_set = gt_set)
                 
                 
-
+                # #check GT diversity
+                # generated_tgt_idx=gt_tgt_idx.clone().detach()
+                # probs = torch.ones(generated_tgt_idx.shape+(model.vocab_size,),device=model.device)
                 
                 
                 #remove <sos>
                 tgt_out = gt_tgt_idx[:,1:] 
                 generated_tgt_idx = generated_tgt_idx[:,1:]
                 probs = probs[:,1:]
+                
+                preds_.extend(generated_tgt_idx.numpy(force=True))
+                gts.extend(tgt_out.numpy(force=True))
+                
+                # print("-"*10)
+                # print(generated_tgt_idx.numpy(force=True))
+                # print(tgt_out.numpy(force=True))
+                # print(compute_LCP_stats(generated_tgt_idx.numpy(force=True), tgt_out.numpy(force=True)))
+                # print("-"*10)
         
                 #compute WER
                 wers.append(compute_WER(generated_tgt_idx, tgt_out, eos_idx))
@@ -100,16 +113,23 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
             
             wer += np.mean(wers)
             wer_std += np.std(wers)
+            
     
     acc, acc_std = acc/runs, acc_std/runs
     diversity, diversity_std = diversity/runs, diversity_std/runs
     perplexity, perplexity_std = perplexity/runs, perplexity_std/runs 
     wer, wer_std = wer/runs, wer_std/runs
     
+    #pad if necessary for LCP compute
+    if len(set([len(p) for p in preds_]))!=1:
+        max_len = len(max(preds_, key=lambda x: len(x)))
+        preds_ = np.array([np.concatenate([p,-np.ones(max_len-len(p))]) for p in preds_]) #append -1 so its not in the vocabulary
+    LCP_stats = compute_LCP_stats(preds_, gts)
+    
     return Munch(accuracy={"mean":acc,"std":acc_std},
                  diversity={"mean":diversity,"std":diversity_std},
                  perpleity={"mean":perplexity,"std":perplexity_std},
-                 WER = {"mean":wer, "std":wer_std},)
+                 WER = {"mean":wer, "std":wer_std}), LCP_stats, accs, divs, wers, perplexs
     
     
 
@@ -273,7 +293,8 @@ def parse_args():
     parser.add_argument("--model_ckps_folder",type=Path,default=None)
     parser.add_argument('--data',choices=['canonne','moises']) #canonne/moises
     parser.add_argument("--split", choices = ['val','val_subset','test'])
-    parser.add_argument('--k',type=float, default=1)
+    parser.add_argument("--batch_size",type=int,default=24)
+    parser.add_argument('--k',type=float, default=0.8)
     parser.add_argument("--k_percent_vocab",action="store_true")
     #if already generated audio samples
     parser.add_argument("--generate",action='store_true')
@@ -482,7 +503,7 @@ def main():
             elif args.data == 'moises':
                 eval_roots = moises_tracks
             
-            eval_fetcher = build_coupling_ds(eval_roots,24,
+            eval_fetcher = build_coupling_ds(eval_roots,args.batch_size,
                                             track_duration,chunk_duration,
                                             segmentation_strategy=segmentation_strategy,
                                             pre_segmentation='uniform',
@@ -491,7 +512,7 @@ def main():
             #eval_fetcher.device = device
 
             #compute metrics
-            output = evaluate_generation(model, eval_fetcher, k, args.force_coupling, args.decoding_type, args.temperature, args.entropy_weight)
+            output,LCP_stats,accs, divs, wers, perplexs = evaluate_generation(model, eval_fetcher, k, args.force_coupling, args.decoding_type, args.temperature, args.entropy_weight)
             
             #save output to file
             #save_to_file({'k':k},eval_file)
@@ -499,6 +520,9 @@ def main():
             
             #save to npy file
             np.save(save_dir.joinpath(f"symbolic_gen_eval_{t}"), output)
+            np.save(save_dir.joinpath(f"LCP_{t}"), LCP_stats)
+            np.savez(save_dir.joinpath("symbolic_gen_eval_all"),acc=accs,div=divs,wer=wers,ppl=perplexs)
+            
         
         if 'quality' in args.task :
             prGreen("Evaluating audio quality...")
@@ -543,7 +567,11 @@ def main():
             
             #for baseline (higher bound)
             if tgt_folder.name == "original":
-                tgt_folder = save_dir.joinpath("original") 
+                tgt_folder = save_dir.joinpath("original")
+            
+            #for comparison of apa with only source/guide
+            if tgt_folder.name == "source":
+                tgt_folder = save_dir.joinpath("source") 
                 
             
             if not tgt_folder.exists():
