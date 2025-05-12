@@ -35,6 +35,7 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
     perplexity, perplexity_std = 0,0
     wers = []
     wer, wer_std = 0,0
+    gt_means = []
     
     preds_, gts = [], [] #for LCP
     
@@ -54,6 +55,8 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
                 gt_tgt_idx = model.encode(tgt,tgt_pad_mask)[1]
                 gt_set = torch.unique(gt_tgt_idx) if force_coupling else None
                 
+                #gt_means.append(len(gt_set)/model.vocab_size)
+                
                 #generate output
                 generated_tgt, generated_tgt_idx, probs = model.generate(src,src_pad_mask,k,
                                                         decoding_type=decoding,
@@ -63,7 +66,7 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
                                                         gt_set = gt_set)
                 
                 
-                # #check GT diversity
+                # #check GT stats
                 # generated_tgt_idx=gt_tgt_idx.clone().detach()
                 # probs = torch.ones(generated_tgt_idx.shape+(model.vocab_size,),device=model.device)
                 
@@ -119,6 +122,9 @@ def evaluate_generation(model : Seq2SeqCoupling, eval_fetcher : Fetcher, k: int,
     diversity, diversity_std = diversity/runs, diversity_std/runs
     perplexity, perplexity_std = perplexity/runs, perplexity_std/runs 
     wer, wer_std = wer/runs, wer_std/runs
+    
+    # gt_mean = np.mean(gt_means)
+    # gt_std = np.std(gt_means)
     
     #pad if necessary for LCP compute
     if len(set([len(p) for p in preds_]))!=1:

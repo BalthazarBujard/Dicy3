@@ -440,8 +440,8 @@ def compute_identical_idx_lengths(idxs : np.ndarray) -> List:
     
     return lengths
 
-def broken_histogram_plot(histogram, y_break, title, label):
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+def broken_histogram_plot(histogram, y_break, title, label, xlabel, ylabel):
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True,dpi=200)
     fig.subplots_adjust(hspace=0.1)  # adjust space between Axes
 
     #plot data on same axis
@@ -470,6 +470,8 @@ def broken_histogram_plot(histogram, y_break, title, label):
     ax1.grid()
     ax2.grid()
     ax1.legend()
+    ax2.set_xlabel(xlabel)
+    ax1.set_ylabel(ylabel)
     #plt.show()
     return fig
     
