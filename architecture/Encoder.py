@@ -1,4 +1,3 @@
-#%%
 import torch
 from torch.nn import MultiheadAttention
 import torch.nn as nn
@@ -9,7 +8,7 @@ from utils.utils import *
 from typing import Union, List, Tuple
 from .VectorQuantizer import KmeansQuantizer
 
-# TODO : AJOUTER UN ARGUMENT POUR LE CAS OU ON FERAIT DU PRETRAIN DU BACKBONE, DANS CE CAS L'ARGUMENT MASK DOIT ETRE A TRUE MAIS DANS LE CAS GENERAL DE NOTRE APPLICATION 
+# TODO : AJOUTER UN ARGUMENT POUR LE CAS OU ON FERAIT DU PRETRAIN DU BACKBONE, DANS CE CAS L'ARGUMENT MASK DOIT ETRE A TRUE (pour masker les timesteps a predire pour l'objectif du wav2vec) MAIS DANS LE CAS GENERAL DE NOTRE APPLICATION 
 # ON NE PREVOIT PAS DE FAIRE D EPRE-TRAIN MAIS SIMPLEMENT DE L'ADAPTATION
 class Backbone(nn.Module):
     """_summary_
@@ -135,7 +134,7 @@ class Backbone(nn.Module):
             
             else :
                 str="The wav2vec pretrained backbone of type" + str(type(self.backbone)) + "is not supported.\
-                                Only backbones from HuggingFace or fairseq are valid"
+                                Only backbones from HuggingFace or fairseq are supported"
                 raise TypeError(str)
         
         else :
@@ -143,7 +142,7 @@ class Backbone(nn.Module):
 
         #(B,L,D)
         
-        if self.mean : z = torch.mean(z,dim=1) #remove time axis. no need for keepdim i think
+        if self.mean : z = torch.mean(z,dim=1) #remove time axis
         
         elif self.pooling:
             z = z.transpose(1,2) #swap L,D to D,L for max_pool over time
@@ -154,7 +153,7 @@ class Backbone(nn.Module):
         
         return z
 
-#TODO : DOUBLE CHECK IF THIS IMPLEMENTATION IS CORRECT ESPECIALLY THE CREATE_MASK METHOD                
+            
 class TransformerEncoderBloc(nn.Module):
     def __init__(self,
                  embed_dim : int = 768, 
@@ -180,7 +179,7 @@ class TransformerEncoderBloc(nn.Module):
     
     def _create_collapse_mask(self,S,T,idx=0) -> torch.Tensor :
         mask = torch.full(size=(T,S), fill_value=-torch.tensor(float("inf")),device=self.device)
-        mask[idx,:]=0 #create mask to mask all timesteps expect last one that attends to all  previous steps
+        mask[idx,:]=0 #create mask to mask all timesteps except first one that attends to all  previous steps
         mask = torch.diagonal_scatter(mask,torch.zeros(min(T,S))) #let self attention because otherwise error during attention's softmax
         
         #mask=mask.to(torch.bool)
@@ -196,7 +195,7 @@ class TransformerEncoderBloc(nn.Module):
     def forward(self,x:torch.Tensor, padding_mask : torch.Tensor = None) -> torch.Tensor: #x : (B,L,D)
         
         #compute self-attention mask
-        mask=self._create_collapse_mask(x.shape[1],x.shape[1]) if self.condense_type=='mask' else None #CAREFUL THAT TAKING LAST STEP IS OKAY (MAYBE WITH THE PADDING THERE IS NO INFO BUT MHA SHOULD LEARN TO PUT IT THERE)
+        mask=self._create_collapse_mask(x.shape[1],x.shape[1]) if self.condense_type=='mask' else None 
 
         #transformer block with pre-LN (better convergence cf "On Layer Normalization")
         x_norm = self.ln1(x)
@@ -230,7 +229,7 @@ class LocalEncoder(nn.Module):
         self.encoder = pretrained_encoder
         
         assert self.encoder.mean==False, "Backbone should return a sequence but backbone.mean=True !"
-        assert head_module in ["attention", "pooling", "mean"], "head module accepts only 'attention' for MHA, 'pooling' for simple max pooling or 'mean'  as choices."
+        assert head_module in ["attention", "pooling", "mean"], "head module accepts only 'attention' for MHA, 'pooling' for simple max pooling or 'mean' as arguments."
         assert chunking_pre_post_encoding in ["pre", "post"], "Wrong argument, choose between 'pre' and 'post"
         
         self.head_module=head_module
@@ -241,7 +240,7 @@ class LocalEncoder(nn.Module):
             
             if embed_dim != self.encoder.dim:
                 prRed("For now this class doesnt accept embed_dim different than the one given by backbone.\
-                    Later might implement adaptation layer to project to the correct embed_dim given as input")
+                    Later might implement adaptation layer to project to the correct embed_dim given as argument")
                 #self.adapt_layer=nn.Linear(self.encoder.get_embed_dim(),embed_dim)
                 embed_dim=self.encoder.dim
             
@@ -315,7 +314,6 @@ class LocalEncoder(nn.Module):
         
         return padding_mask
     
-    #TODO : REMOVE THE "if padding_maks!=None..." BY ASSURING THAT A PADDING MASK IS GIVEN AS ARGUMENT OR IF ITS NONE THEN CREATE A PADDING MASK WITH FULL ZEROS
     def __pre_chunking_encoding(self, x : torch.Tensor, padding_mask : torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
         max_samples = x.size(-1)
         
@@ -329,7 +327,6 @@ class LocalEncoder(nn.Module):
         
         return x, padding_mask
     
-    #TODO : REMOVE THE "if padding_maks!=None..." BY ASSURING THAT A PADDING MASK IS GIVEN AS ARGUMENT OR IF ITS NONE THEN CREATE A PADDING MASK WITH FULL ZEROS
     def __post_chunking_encoding(self, x : torch.Tensor, padding_mask : torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor] :
         
         B,chunks,max_samples = x.shape
@@ -378,7 +375,7 @@ class LocalEncoder(nn.Module):
             #crop x and reshape as B*chunks,...
             x = x[:,:pad,:].contiguous().view(B*chunks,-1,x.size(-1)) #(B*chunks,L_enc,dim)
             
-            #process mask with cropped x
+            #process mask with cropped x. padding mask doent need cropping, it is done in the process_padding_mask emthod
             padding_mask = self._process_padding_mask(x, padding_mask) #(B*chunks,L_enc)
             
             padding_mask=padding_mask.view(B*chunks,-1)
@@ -405,33 +402,10 @@ class LocalEncoder(nn.Module):
         
         B,chunks,max_samples = x.shape #original_sahpe
         
-        # if chunks*max_samples/self.encoder.sampling_rate>self.encoder.max_duration + 1: #if track duration too big for encoder
-        #     print(chunks*max_samples/self.encoder.sampling_rate)
-        #     print("Reshaping tracks to match max input length of backbone")
-        #     max_duration = self.encoder.max_duration
-        #     sr = self.encoder.sampling_rate
-            
-        #     chunks_ = max_duration*sr/max_samples #chunks'
-
-        #     if not chunks_.is_integer(): raise RuntimeError("max_duration is not divisible by chunk duration...")
-
-        #     chunks_ = int(chunks_)
-        #     #print(chunks, chunks_)
-
-        #     B_ = B*chunks/chunks_
-        #     #print(B,B_)
-
-        #     if not B_.is_integer(): raise RuntimeError("track_duration is not divisible by max_duration...")
-
-        #     B_ = int(B_)
-
-        #     x = x.reshape(B_,chunks_,max_samples) #reshape as (B',chunks',samples)
-        #     padding_mask = padding_mask.reshape(B_,chunks_,max_samples) #same
-        
         #encode chunks   
         x, padding_mask = self.encode(x, padding_mask) #(B*chunks,L_enc,dim)
         
-        #collapse along max_samples dim
+        #collapse along time dim
         x = self.collapse(x, padding_mask)
     
         # at this point x : (B*chunks,D) 

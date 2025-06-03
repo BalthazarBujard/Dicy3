@@ -76,6 +76,7 @@ class EmbeddingPositionalEncoding(nn.Module):
     
 
 #TODO : IMPLEMENT generate() METHOD FOR FUTURE USE OF SEQUENCE CONTINUATION PREDICTION
+# class for autocompletion task
 class Seq2SeqBase(nn.Module):
     def __init__(self, localEncoder : LocalEncoder, decisionModule : Decision, 
                  max_len : int, use_special_tokens : bool = True, has_masking : bool = False): 
@@ -86,14 +87,14 @@ class Seq2SeqBase(nn.Module):
         self.name = None
         self.segmentation = None
         
-        self.encoder = localEncoder#LocalEncoder(pretrained_backbone,quantizer,head_module=encoder_head)
+        self.encoder = localEncoder
     
         self.dim = self.encoder.dim #keep same dimension as output of encoder
         
         self.pe = PositionalEncoding(self.dim,max_len=max_len)
         
         #transformer bloc for seq2seq modeling
-        self.decision=decisionModule #nn.Transformer(self.dim,num_encoder_layers=transformer_layers,num_decoder_layers=transformer_layers, batch_first=True) 
+        self.decision=decisionModule 
         
         self.max_len=max_len
         self.codebook_size = localEncoder.quantizer.codebook_size #CAREFUL IF MULTIPLE CODEBOOKS !!!
@@ -114,7 +115,8 @@ class Seq2SeqBase(nn.Module):
                 self.register_buffer(attr, torch.tensor(token_idx)) #needed in state dict but not trainable. used for embedding retrieval
                 self.special_tokens_idx[attr]=torch.tensor(self.codebook_size+extra_tokens) #maybe need to convert to float and send to device here
                 extra_tokens+=1
-                
+        
+        #TODO : COULD BE USEFUL TO CONCATENATE THE VOCAB AND SPECIAL TOKENS TABLE IN ONE
         self.vocab_embedding_table = self.encoder.quantizer.codebook #contains only the vocabulary (not the special tokens)
         
         if has_masking:
@@ -134,6 +136,7 @@ class Seq2SeqBase(nn.Module):
     
     
     #tgt=src for this model
+    #TODO : it's a bit weird to give as memory (source) the whole input sequence since its the one to be predicted. The model should fijnally learn to predict the memory
     def forward(self, src : torch.Tensor, src_pad_mask : torch.Tensor, 
                 sample_codebook_temp : float = None, mask_time_indices : torch.Tensor = None) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
          
@@ -153,7 +156,7 @@ class Seq2SeqBase(nn.Module):
         tgt = tgt.detach()
         tgt_pad_mask = src_pad_mask
         
-        #the seq2seq transformer predicts every next step so we remove last timestep for it to be predicted (all timesteps are predicted sequentially)
+        #the seq2seq transformer predicts every next step so we remove last timestep for it to be predicted (all timesteps are predicted in parallel)
         tgt_input = tgt[:,:-1] 
         tgt_pad_mask = tgt_pad_mask[:,:-1]
         
@@ -174,11 +177,11 @@ class Seq2SeqBase(nn.Module):
         
         return out, tgt, src_idx, codebook_loss #return predictions and encoded target sequence for loss computing
     
-    def _create_causal_mask(self, sz : int):
+    def _create_causal_mask(self, sz : int) -> torch.Tensor:
         mask = torch.triu(torch.ones((sz,sz), device=self.device), diagonal=1).to(torch.bool) #equivalent to generate_square_subsequent_mask
         return mask
     
-    def _create_masks(self, src : torch.Tensor, tgt : torch.Tensor):
+    def _create_masks(self, src : torch.Tensor, tgt : torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         #src : (B,S,max_samples) and tgt : (B,T, max_samples)
         S,T = src.size(1), tgt.size(1)
         if self.decision.decoder_only:
@@ -186,11 +189,11 @@ class Seq2SeqBase(nn.Module):
         
         else : src_mask = torch.zeros((S,S), device=self.device).to(torch.bool) #src self attention can attend to all timesteps
         
-        tgt_mask = torch.triu(torch.ones((T,T), device=self.device), diagonal=1).to(torch.bool) #equivalent to generate_square_subsequent_mask
+        tgt_mask = self._create_causal_mask(T)
         
         return src_mask, tgt_mask   
     
-    def _find_first_pad_index(self, pad_mask : torch.Tensor):
+    def _find_first_pad_index(self, pad_mask : torch.Tensor) -> torch.Tensor:
         assert pad_mask.dtype==torch.bool, "Padding mask should be a bool tensor with True where there is padding and False everywhere else"
         #find if there are any true values in the poadding mask (usually at least one sequence has not padding as its the longest sequence)
         
@@ -275,19 +278,12 @@ class Seq2SeqBase(nn.Module):
             
         B = memory.size(0)
         
-        # if tgt_gt != None: 
-        #     if tgt_gt.ndim < 2 : #1D tensor
-        #         print("Expanding tgt_gt dim to match batch size")
-        #         #expand batch dimension
-        #         tgt_gt = tgt_gt.view(1,-1).repeat(B,1)
-            
-        #     assert tgt_gt.shape[1]>=max_len, "If tgt_out is specified, it should be at least as long as max_len" 
-        
         if gt_set != None:
             if gt_set.ndim < 2 : #1D tensor
                 gt_set = gt_set.view(1,-1).repeat(B,1) # (B, set size)                
+        
         #init tgt as SOS
-        tgt = self.special_token_embeddings(self.sos).unsqueeze(0).expand(B,1,-1) #(B,1,D)
+        tgt = self.special_token_embeddings.forward(self.sos).unsqueeze(0).expand(B,1,-1) #(B,1,D)
         tgt_idx = torch.full((B,1),fill_value=self.special_tokens_idx["sos"],device=self.device) #(B,1)
         
         #initialize first logits as zeros for SOS
@@ -430,6 +426,7 @@ class Seq2SeqBase(nn.Module):
         
         return probs
     
+    #custom score function for beam search decoding
     def __beam_search_custom_fn(self,candidate:Candidate,entropy_weight:float=0.):
         probs = torch.tensor(candidate.compute_prob())
         llh=torch.log(probs)/(candidate.effective_length**0.75)
@@ -442,25 +439,23 @@ class Seq2SeqBase(nn.Module):
 
     
     def _beam_search_decoding(self, memory : torch.Tensor, memory_pad_mask : torch.Tensor, 
-                              k : int, max_len : int, temperature : float, entropy_weight : Optional[float] = 0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                              k : int, max_len : int, temperature : float, entropy_weight : float = 0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         B = memory.size(0)
         
+        #init with SOS
         x_init = torch.tensor([[self.special_tokens_idx['sos'].item()] for _ in range(B)], device=self.device)
         eos = self.special_tokens_idx['eos'].item()
         
+        #kwargs
         trans_fn_args = {'memory':memory, 'memory_mask':memory_pad_mask,"temperature":temperature}
         score_fn_args = {'entropy_weight':entropy_weight} 
         
+        #init beam search
         beamsearch = BeamSearch(self.__beam_search_transition_fn, trans_fn_args, terminal_state = eos, score_fn=self.__beam_search_custom_fn,score_fn_args=score_fn_args)
 
+        #find best candidate sequences
         best_candidates = beamsearch(x_init, k, max_len) #(B,nbest) with nbest = 1
-        
-        # for batch_candidates in best_candidates:
-        #     for nbest_candidate in batch_candidates:
-        #         print(nbest_candidate)
-        # best_candidates = [[best_candidate for best_candidate in nbest_candidates[0:1]] for nbest_candidates in best_candidates]
-        #convert candidates to states and embeddings
         
         tgt_idx = torch.tensor([[c.states for c in nbest_candidate] for nbest_candidate in best_candidates],device=self.device).squeeze(1) #remove extra dimension
         tgt = self.from_indexes_to_embeddings(tgt_idx)
@@ -565,7 +560,6 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         return x, src_mask
     
-    #TODO : utiliser self.encode plutot que manuellement appeler encoder et apply special tokens
     def forward(self, src : torch.Tensor, tgt : torch.TensorType, 
                 src_pad_masks : List[torch.Tensor], tgt_pad_masks : List[torch.Tensor], 
                 sample_codebook_temp : Optional[float] = None, 
@@ -619,7 +613,8 @@ class Seq2SeqCoupling(Seq2SeqBase):
             src, src_mask = self._apply_masking(src, mask_time_indices, tgt_input)
             
             
-        out = self.decision.forward(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) #already logits over vocab_size
+        #compute probs over vocab space
+        out = self.decision.forward(src, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask, src_pad_mask=src_pad_mask, tgt_pad_mask=tgt_pad_mask) 
         
         return out, tgt, tgt_idx, codebook_loss #return predictions and encoded target sequence for loss computing
     
@@ -641,6 +636,7 @@ class Seq2SeqCoupling(Seq2SeqBase):
         
         return tgt, tgt_idx, probs
     
+    #encode + coupling
     @torch.no_grad 
     def generate(self,src : torch.Tensor ,src_pad_masks : List[torch.Tensor], 
                  k : int, decoding_type : str, max_len : Optional[int] = None, 

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-#decision module class : contains the transformer module (enc-dec or dec-only)
+
 class Decision(nn.Module):
     def __init__(self, dim : int, layers : int, vocab_size : int, inner_dim : int = 2048, heads : int = 8, dropout=0.1,decoder_only : bool = False, norm_first : bool = True, relative_pe : bool = True):
         

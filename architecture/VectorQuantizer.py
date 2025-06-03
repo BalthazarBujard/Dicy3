@@ -14,15 +14,17 @@ class KmeansQuantizer(nn.Module):
         super().__init__()
         
         if isinstance(centers,np.ndarray) : centers = torch.from_numpy(centers)
-        
+    
         self.codebook_size=len(centers)
-        self.centers=centers #DONT KNOW IF GOOD IDEA TO DO THIS ? COULD LEAD TO GRADIENT PROBLEM ?
+        self.centers=centers 
         
         if dim==centers.size(-1):
+            #if dimension of codebook and VQ are the same, init the codebook with the pre-computed centers. 
             self.codebook=nn.Parameter(centers,requires_grad=learnable_codebook) #(vocab_size,dim)
             self.dim=centers.size(-1)
             
         elif dim!=centers.size(-1) and learnable_codebook :
+            #if learnable codebook and codebook dim different than centers dim, create an embedding table
             self.codebook = nn.Embedding(centers.size(0),dim)
             self.dim=dim
         
@@ -36,14 +38,13 @@ class KmeansQuantizer(nn.Module):
         self.separate_codebook_per_head=False
         
         self.restart = restart
-        #self.codebook_usage = torch.zeros(self.codebook_size,dtype=torch.float32) 
         self.codebook_usage = torch.zeros(self.codebook_size)#register_buffer('codebook_usage',torch.zeros(self.codebook_size))
         self.decay = torch.tensor(0.99) #0.99
         self.beta = torch.tensor(0.25)
         
         #for easier checkpoint loading and compatibility
-        self.is_special = is_special
-        self.data = data
+        self.is_special = is_special #using pre-computed centers specialized for chunk size, dataset and vocab size
+        self.data = data #if sepcial, specify the dataset used
     
     @property
     def device(self):
@@ -54,7 +55,7 @@ class KmeansQuantizer(nn.Module):
             self.codebook_usage[indexes]=1. #restart usage count
             self.codebook[indexes] = new_codevectors  # Avoids gradient tracking
     
-    # TODO : USE CODEBOOK TEMPERATURE FOR SELECTION -> INCREMENT DIVERSITY
+    
     def forward(self, x : torch.Tensor, sample_codebook_temp : float=0.) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
         size=x.size()
         
