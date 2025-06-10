@@ -1,5 +1,3 @@
-#%%
-#%%
 from architecture.Model import load_model_checkpoint
 from architecture.Seq2Seq import Seq2SeqBase,Seq2SeqCoupling
 from utils.utils import lock_gpu, prGreen, prRed, prYellow, detect_onsets, find_non_empty, compute_consecutive_lengths

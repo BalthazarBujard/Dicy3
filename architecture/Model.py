@@ -125,7 +125,8 @@ def build_backbone(checkpoint : Path, type : str, mean : bool, pooling : bool, o
     
     return backbone
 
-def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, restart : bool, is_special: bool, chunk_size : float = None, data : str = None)-> KmeansQuantizer:
+def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, restart : bool, 
+                    is_special: bool, chunk_size : float = None, data : str = None, path : str = None)-> KmeansQuantizer:
     """
     Function to build the Vector Quantizer module from the pre-computed centers from kmeans.
 
@@ -137,6 +138,7 @@ def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, rest
         is_special (bool): If the pre-computed centers are from the specialized training, i.e. centers optimized per segmentation size and dataset.
     chunk_size (float, optional): size of the segmentation window for the special VQ. Defaults to None.
         data (str, optional): The dataset keyword : moises or canonne, for special VQ. Defaults to None.
+        path (str, optionale): path to the trained VQ if other than moises or canonne.
 
     Returns:
         KmeansQuantizer: VQ from pre-computed centers.
@@ -148,8 +150,11 @@ def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, rest
         assert data in ["canonne", "moises"]
         print("Special VQ")
         centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{chunk_size}s_{data}.npy",allow_pickle=True)
-    else :
+    elif path == None :
         centers=np.load(f"clustering/kmeans_centers_{vocab_size}_{dim}.npy",allow_pickle=True)
+    else :
+        centers = np.load(path, allow_pickle = True)
+        
     centers=torch.from_numpy(centers)
     vq = KmeansQuantizer(centers,learnable_codebook,dim,restart,is_special, data)
     
@@ -159,7 +164,7 @@ def build_quantizer(dim : int, vocab_size : int, learnable_codebook : bool, rest
 def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone : bool, dim : int, 
                        vocab_size : int, learnable_codebook : bool, restart_codebook : bool,
                        chunking : str = "post", encoder_head : str = "mean", condense_type : str = None, 
-                       special_vq: bool = True, chunk_size : float = None, data : str = None) -> LocalEncoder:
+                       special_vq: bool = True, chunk_size : float = None, data : str = None, path : str = None) -> LocalEncoder:
     """
     Function to build the localEncoder module (equivalent to the Perception module from "Learning Relationships Between Separate AudioTracks for Creative Applications" (Bujard, 2025))
 
@@ -177,6 +182,7 @@ def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone
         special_vq (bool, optional): if speical vq is used. Defaults to True.
         chunk_size (float, optional): segmentation size. Defaults to None.
         data (str, optional): dataset used for centers kmeans. Defaults to None.
+        path (str, optionale): path to the trained VQ if other than moises or canonne.
 
     Raises:
         ValueError: if not freeze_backbone and not learnable_codebook
@@ -205,7 +211,7 @@ def build_localEncoder(backbone_ckp : Path, backbone_type : str, freeze_backbone
        
     
     #vector quantizer  
-    vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook, special_vq, chunk_size, data)
+    vq = build_quantizer(dim, vocab_size, learnable_codebook,restart_codebook, special_vq, chunk_size, data, path)
     
     localEncoder=LocalEncoder(backbone,vq,encoder_head,embed_dim=backbone.dim,condense_type=condense_type,chunking_pre_post_encoding=chunking)
     
@@ -245,6 +251,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint : Path,
                        special_vq : bool = True,
                        chunk_size : float = None,
                        data : str = None,
+                       VQpath : str = None,
                        relative_pe : bool = False,
                     #    kmeans_init : bool = False,
                     #    threshold_ema_dead_code : float = 0,
@@ -278,6 +285,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint : Path,
         special_vq (bool, optional): specialized vq. Defaults to True.
         chunk_size (float, optional): segmentation window size. Defaults to None.
         data (str, optional): datset for specialized vq. Defaults to None.
+        VQpath (str, optionale): path to the trained VQ if other than moises or canonne
         relative_pe (bool, optional): apply relative positional encoding. Defaults to False.
        
     Returns:
@@ -291,7 +299,7 @@ def SimpleSeq2SeqModel(backbone_checkpoint : Path,
     localEncoder=build_localEncoder(backbone_checkpoint,backbone_type, freeze_backbone, dim,
                                     vocab_size, learnable_codebook, restart_codebook, chunking,
                                     encoder_head, condense_type, 
-                                    special_vq, chunk_size, data)
+                                    special_vq, chunk_size, data, VQpath)
         
     decision_module = build_decision(localEncoder.dim,transformer_layers,
                                      vocab_size=vocab_size+3*use_special_tokens, #+ pad, sos, eos
