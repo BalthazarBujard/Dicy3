@@ -229,7 +229,7 @@ def main(args):
     
     tracks = [args.track1, args.track2] #get list of tracks from args
     #train VQ on input tracks
-    #trainVQ(args.vocab_size, args.chunk_duration, tracks)
+    trainVQ(args.vocab_size, args.chunk_duration, tracks)
     
     #build model
     model = build_model(args)
