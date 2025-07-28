@@ -16,7 +16,6 @@ import copy
 
 DEVICE = lock_gpu()[0][0]
 
-
 def trainVQ(codebook_size : int, chunk_duration : float, tracks : List[str]):
     #fonction reçoit taille du codebook, le chunk size et la liste des pistes utilisées pour l'entrainement du moodèle
     
@@ -207,8 +206,8 @@ def build_trainer(model:torch.nn.Module, args):
 def argparser():
     parser = ArgumentParser()
     
-    parser.add_argument("--track1", type = str, help = "Path to the input (guide) audio file") #str type because Dataset class still needs update to enable Path type...
-    parser.add_argument("--track2", type = str, help = "Path to the output (target) audio file")
+    parser.add_argument("--track1", type = str, help = "Path to the input (guide) audio file or folder") #str type because Dataset class still needs update to enable Path type...
+    parser.add_argument("--track2", type = str, help = "Path to the output (target) audio file or folder")
     parser.add_argument("--vocab_size", type=int, choices=[16,32,64,128,256,512,1024], help="Codebook size")
     parser.add_argument('-layers','--transformer_layers',type=int,default=6)
     parser.add_argument('--inner_dim',type=int,default=2048)

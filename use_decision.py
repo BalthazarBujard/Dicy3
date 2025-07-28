@@ -16,7 +16,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--memory', type=Path, help = "Path to 'memory' audio file.")
     parser.add_argument('--source', type=Path,nargs="*", help="Path(s) to guiding input audio file(s). Multiple files will automatically be mixed.")
-    parser.add_argument("--model_ckp",type=Path, help = "Path to trained model checkpoint.")
+    parser.add_argument("--model_ckp",type=Path, help = "Path to trained model checkpoint. If you choose one of your ptrained models from 'train_model.py', specify the path to the trained VQ on your specific data.")
     parser.add_argument("--VQpath",type=str,default=None,help="path to trained VQ from 'train_model.py' script.")
     parser.add_argument("--with_coupling",action='store_const', default=True, const=False, 
                         help="De-activate coupling, do matching from input to output.") #TODO : change param name
