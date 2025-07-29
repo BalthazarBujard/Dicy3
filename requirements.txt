@@ -17,3 +17,5 @@ torcheval==0.0.7
 tqdm==4.66.2
 transformers==4.48.1
 umap_learn==0.5.5
+beam-search-BB #custom beam search package
+concatenate-BB #custom concatenative synthesis package
