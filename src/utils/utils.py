@@ -90,7 +90,7 @@ def lock_gpu(num_devices=1):
         manager=True
     except ModuleNotFoundError as e:
         manager=False
-        
+    manager=False
     devices=[]
     ids=[]
     
