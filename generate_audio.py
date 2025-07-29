@@ -21,7 +21,7 @@ def parse_args():
                         help = "Path(s) to trained model(s) checkpoint(s).")
     parser.add_argument("--VQpath",type=str,default=None,help="path to trained VQ from 'train_model.py' script.")
     parser.add_argument("--with_coupling",action='store_const', default=True, const=False, 
-                        help="De-activate coupling, do matching from input to output.") # TODO : change param name
+                        help="De-activate coupling, generate identity matching from input to output.") # TODO : change param name
     parser.add_argument("--k",type=float,default=0.8, help = "Top-K/P value. If k<1 use top-P, else top-K. Increasing k/p will add diversity to the output.")
     parser.add_argument("--temperature", type = float, default=1., help = "Temperature value. Increasing this parameter will flatten the probability distribution, increasing the diversity of predictions.")
     parser.add_argument("--force_coupling", action = 'store_true', 
